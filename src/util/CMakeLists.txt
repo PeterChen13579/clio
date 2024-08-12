@@ -28,6 +28,9 @@ target_sources(
           newconfig/ObjectView.cpp
           newconfig/ArrayView.cpp
           newconfig/ValueView.cpp
+          newconfig/ConfigFileJson.cpp
+          newconfig/ConfigConstraints.cpp
+          newconfig/Array.cpp
 )
 
 target_link_libraries(
