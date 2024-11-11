@@ -119,10 +119,15 @@ LedgerEntryHandler::process(LedgerEntryHandler::Input input, Context const& ctx)
             );
 
             auto const sorted = credentials::createAuthCredentials(authorizedCredentials);
+            for (auto const& a : *sorted) {
+                std::cout << "issuer: " << a.first << std::endl;
+                std::cout << "cred type: " << a.second << std::endl;
+            }
             if (!sorted.has_value())
                 return Error{std::move(sorted).error()};
 
             key = ripple::keylet::depositPreauth(owner.value(), *sorted).key;
+            std::cout << key << std::endl;
         }
     } else if (input.ticket) {
         auto const id =

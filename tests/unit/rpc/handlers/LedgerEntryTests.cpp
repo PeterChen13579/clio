@@ -2333,11 +2333,10 @@ generateTestValuesForNormalPathTest()
             ),
             ripple::keylet::depositPreauth(
                 account1,
-                *credentials::createAuthCredentials(CreateAuthCredentialArray(
-                    std::vector<std::string_view>{ACCOUNT2}, std::vector<std::string_view>{CREDENTIALTYPE}
-                ))
-            )
-                .key,
+                *credentials::createAuthCredentials2(
+                    json::array{boost::json::object{{"issuer", ACCOUNT2}, {"credential_type", CREDENTIALTYPE}}}
+                )
+            ).key,
             CreateDepositPreauthLedgerObjectByAuthCredentials(ACCOUNT, ACCOUNT2, CREDENTIALTYPE)
         },
         NormalPathTestBundle{
@@ -2680,6 +2679,8 @@ TEST_P(RPCLedgerEntryNormalPathTest, NormalPath)
     // return valid ledgerHeader
     auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, RANGEMAX);
     EXPECT_CALL(*backend, fetchLedgerBySequence(RANGEMAX, _)).WillRepeatedly(Return(ledgerHeader));
+
+    std::cout << "expected: " << testBundle.expectedIndex << std::endl;
 
     EXPECT_CALL(*backend, doFetchLedgerObject(testBundle.expectedIndex, RANGEMAX, _))
         .WillRepeatedly(Return(testBundle.mockedEntity.getSerializer().peekData()));

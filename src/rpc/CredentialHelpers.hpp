@@ -62,4 +62,7 @@ createAuthCredentials(ripple::STArray const& in);
 ripple::STArray
 parseAuthorizeCredentials(boost::json::array const& jv);
 
+std::expected<std::set<std::pair<ripple::AccountID, ripple::Slice>>, Status>
+createAuthCredentials2(boost::json::array const& jv);
+
 }  // namespace rpc::credentials

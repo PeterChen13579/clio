@@ -93,4 +93,44 @@ parseAuthorizeCredentials(boost::json::array const& jv)
     return arr;
 }
 
+std::expected<std::set<std::pair<ripple::AccountID, ripple::Slice>>, Status>
+createAuthCredentials2(boost::json::array const& jv)
+{
+    ripple::STArray arr;
+    for (auto const& jo : jv) {
+        auto const issuer = ripple::parseBase58<ripple::AccountID>(
+            static_cast<std::string>(jo.at(ripple::jss::issuer.c_str()).as_string())
+        );
+        ASSERT(
+            issuer.has_value(), "issuer must be present, should already be checked in AuthorizeCredentialValidator."
+        );
+
+        auto const credentialType =
+            ripple::strUnHex(static_cast<std::string>(jo.at(ripple::jss::credential_type.c_str()).as_string()));
+
+        ASSERT(
+            credentialType.has_value(),
+            "credential_type must be present, should already be checked in AuthorizeCredentialValidator."
+        );
+
+        auto credential = ripple::STObject::makeInnerObject(ripple::sfCredential);
+        credential.setAccountID(ripple::sfIssuer, *issuer);
+        credential.setFieldVL(ripple::sfCredentialType, *credentialType);
+        arr.push_back(std::move(credential));
+    }
+
+    std::set<std::pair<ripple::AccountID, ripple::Slice>> out;
+    for (auto const& cred : arr) {
+        auto [it, ins] = out.insert({cred[ripple::sfIssuer], cred[ripple::sfCredentialType]});
+        if (!ins)
+            return std::unexpected{Status{RippledError::rpcBAD_CREDENTIALS, "duplicates in credentials."}};
+    }
+
+    for (auto const& a : out) {
+        std::cout << a.first << std::endl;
+        std::cout << a.second << std::endl;
+    }
+    return out;
+}
+
 }  // namespace rpc::credentials
