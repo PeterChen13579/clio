@@ -123,13 +123,25 @@ func main() {
 	if *objects {
 		go func() {
 			log.Printf("Checking objects from range: %d to %d\n", *fromLedgerIdx, *toLedgerIdx)
-			seq := checkingStatesFromLedger(cluster, *fromLedgerIdx, *toLedgerIdx, *cursors)
+			session, err := cluster.CreateSession()
+			if err != nil {
+				log.Fatal(err)
+			}
+			defer session.Close()
+			cluster.NumConns = 50 // max number of connections possible
+			seq := checkingStatesFromLedger(session, *fromLedgerIdx, *toLedgerIdx, *cursors)
 			mismatchCh <- seq
 		}()
 	} else if *tx {
 		go func() {
 			log.Printf("Checking tx from range: %d to %d\n", *fromLedgerIdx, *toLedgerIdx)
-			mismatch := checkingTransactionsFromLedger(cluster, *fromLedgerIdx, *toLedgerIdx, *step, *txSkipSha, *txSkipAccount, *txSkipNFT, *NFTUriFix, !*txDiff)
+			session, err := cluster.CreateSession()
+			if err != nil {
+				log.Fatal(err)
+			}
+			defer session.Close()
+			cluster.NumConns = 50 // max number of connections possible
+			mismatch := checkingTransactionsFromLedger(session, *fromLedgerIdx, *toLedgerIdx, *step, *txSkipSha, *txSkipAccount, *txSkipNFT, *NFTUriFix, !*txDiff)
 			mismatchCh <- mismatch
 		}()
 	} else if *ledgerHash || *ledgerHashFix {
@@ -141,7 +153,13 @@ func main() {
 	} else if *diff {
 		go func() {
 			log.Printf("Checking diff from range: %d to %d\n", *fromLedgerIdx, *toLedgerIdx)
-			mismatch := checkingDiff(cluster, *fromLedgerIdx, *toLedgerIdx, *cursors)
+			session, err := cluster.CreateSession()
+			if err != nil {
+				log.Fatal(err)
+			}
+			defer session.Close()
+			cluster.NumConns = 50 // max number of connections possible
+			mismatch := checkingDiff(session, *fromLedgerIdx, *toLedgerIdx, *cursors)
 			mismatchCh <- mismatch
 		}()
 	} else {

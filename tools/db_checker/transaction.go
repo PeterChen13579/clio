@@ -10,18 +10,13 @@ import (
 	"github.com/gocql/gocql"
 )
 
-func TraverseTxHashFromDB(cluster *gocql.ClusterConfig, ledgerIndex uint64, skipSha bool, skipAccountTxCheck bool, skipNFT bool, fixNFTUri bool, skipDiff bool) string {
-	session, err := cluster.CreateSession()
-	if err != nil {
-		log.Fatal(err)
-	}
+func TraverseTxHashFromDB(session *gocql.Session, ledgerIndex uint64, skipSha bool, skipAccountTxCheck bool, skipNFT bool, fixNFTUri bool, skipDiff bool) string {
 
-	defer session.Close()
 	var hashes [][]byte
 	scanner := session.Query("select hash from ledger_transactions where ledger_sequence = ?", ledgerIndex).Iter().Scanner()
 	for scanner.Next() {
 		var hash []byte
-		err = scanner.Scan(&hash)
+		err := scanner.Scan(&hash)
 		if err != nil {
 			log.Printf("Error: ledger_transactions reading %d", ledgerIndex)
 			log.Println(err)
@@ -40,7 +35,7 @@ func TraverseTxHashFromDB(cluster *gocql.ClusterConfig, ledgerIndex uint64, skip
 	var deletedIndexes [][]byte
 	var updatedIndexes [][]byte
 	for _, hash := range hashes {
-		err = session.Query(`select transaction,metadata from transactions where hash = ?`,
+		err := session.Query(`select transaction,metadata from transactions where hash = ?`,
 			hash).Scan(&tx, &metadata)
 		if err != nil {
 			log.Printf("Error: Transactions reading %x %v", hash, err)
@@ -194,16 +189,10 @@ func checkAccountTx(session *gocql.Session, ledgerIndex uint64, tx []byte, metad
 	}
 }
 
-func getHashesFromLedgerHeader(cluster *gocql.ClusterConfig, ledgerIndex uint64) (string, string) {
-	session, err := cluster.CreateSession()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	defer session.Close()
+func getHashesFromLedgerHeader(session *gocql.Session, ledgerIndex uint64) (string, string) {
 
 	var header []byte
-	err = session.Query("select header from ledgers where sequence = ?", ledgerIndex).Scan(&header)
+	err := session.Query("select header from ledgers where sequence = ?", ledgerIndex).Scan(&header)
 
 	if err != nil {
 		log.Printf("Error: %v ledgers reading %d", err, ledgerIndex)
@@ -215,12 +204,11 @@ func getHashesFromLedgerHeader(cluster *gocql.ClusterConfig, ledgerIndex uint64)
 	return stateHash, txHash
 }
 
-func checkingTransactionsFromLedger(cluster *gocql.ClusterConfig, startLedgerIndex uint64, endLedgerIndex uint64, step int, skipSHA bool, skipAccount bool, skipNFT bool, fixNFTUri bool, skipDiff bool) uint64 {
+func checkingTransactionsFromLedger(session *gocql.Session, startLedgerIndex uint64, endLedgerIndex uint64, step int, skipSHA bool, skipAccount bool, skipNFT bool, fixNFTUri bool, skipDiff bool) uint64 {
 	ledgerIndex := endLedgerIndex
 	var mismatch uint64 = 0
 
 	for ledgerIndex >= startLedgerIndex {
-
 		thisStep := min(step, int(ledgerIndex-startLedgerIndex+1))
 		var wg sync.WaitGroup
 		wg.Add(thisStep)
@@ -228,10 +216,10 @@ func checkingTransactionsFromLedger(cluster *gocql.ClusterConfig, startLedgerInd
 		for i := 0; i < thisStep; i++ {
 			seq := ledgerIndex - uint64(i)
 			go func() {
-				txHashFromDB := TraverseTxHashFromDB(cluster, seq, skipSHA, skipAccount, skipNFT, fixNFTUri, skipDiff)
+				txHashFromDB := TraverseTxHashFromDB(session, seq, skipSHA, skipAccount, skipNFT, fixNFTUri, skipDiff)
 
 				if !skipSHA {
-					_, txHash := getHashesFromLedgerHeader(cluster, seq)
+					_, txHash := getHashesFromLedgerHeader(session, seq)
 					if txHash != txHashFromDB {
 						mismatch++
 						log.Printf("Error: Tx hash mismatch for ledger %d: %s != %s\n", seq, txHash, txHashFromDB)

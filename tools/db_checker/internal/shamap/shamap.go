@@ -10,6 +10,7 @@ package shamap
 import "C"
 import (
 	"encoding/hex"
+	"log"
 	"strings"
 	"unsafe"
 )
@@ -47,6 +48,9 @@ func (shamap GoSHAMap) AddStateItem(key []byte, value1 []byte, size1 uint32) {
 }
 
 func (shamap GoSHAMap) AddTxItem(value1 []byte, size1 uint32, value2 []byte, size2 uint32) {
+	if size1 == 0 || size2 == 0 {
+		log.Fatalf("Invalid input: value1 and value2 must be non-empty")
+	}
 	cValue1 := C.CBytes(value1)
 	cValue2 := C.CBytes(value2)
 	C.SHAMapAddTxItem(shamap.shamap, (*C.char)(cValue1), C.uint(size1), (*C.char)(cValue2), C.uint(size2))

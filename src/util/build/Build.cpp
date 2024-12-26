@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of clio: https://github.com/XRPLF/clio
-    Copyright (c) 2023, the clio developers.
+    Copyright (c) 2022, the clio developers.
 
     Permission to use, copy, modify, and distribute this software for any
     purpose with or without fee is hereby granted, provided that the above
@@ -17,26 +17,26 @@
 */
 //==============================================================================
 
-#pragma once
+#include "util/build/Build.hpp"
 
-#include "web/interface/ConnectionBase.hpp"
-
-#include <boost/beast.hpp>
-#include <boost/beast/core/error.hpp>
-
-#include <memory>
 #include <string>
 
-namespace web {
+namespace util::build {
 
-/**
- * @brief Specifies the requirements a Webserver handler must fulfill.
- */
-template <typename T>
-concept SomeServerHandler =
-    requires(T handler, std::string req, std::shared_ptr<ConnectionBase> ws, boost::beast::error_code ec) {
-        // the callback when server receives a request
-        { handler(req, ws) };
-    };
+static constexpr char versionString[] = "20241217153517-develop-fc3e60f1";
 
-}  // namespace web
+std::string const&
+getClioVersionString()
+{
+    static std::string const value = versionString;
+    return value;
+}
+
+std::string const&
+getClioFullVersionString()
+{
+    static std::string const value = "clio-" + getClioVersionString();
+    return value;
+}
+
+}  // namespace util::build
