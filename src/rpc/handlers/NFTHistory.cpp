@@ -24,6 +24,7 @@
 #include "rpc/JS.hpp"
 #include "rpc/RPCHelpers.hpp"
 #include "rpc/common/Types.hpp"
+#include "util/Assert.hpp"
 #include "util/Profiler.hpp"
 #include "util/log/Logger.hpp"
 
@@ -32,12 +33,11 @@
 #include <boost/json/value.hpp>
 #include <boost/json/value_from.hpp>
 #include <boost/json/value_to.hpp>
-#include <ripple/basics/base_uint.h>
-#include <ripple/basics/chrono.h>
-#include <ripple/basics/strHex.h>
-#include <ripple/protocol/ErrorCodes.h>
-#include <ripple/protocol/LedgerHeader.h>
-#include <ripple/protocol/jss.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/basics/chrono.h>
+#include <xrpl/basics/strHex.h>
+#include <xrpl/protocol/LedgerHeader.h>
+#include <xrpl/protocol/jss.h>
 
 #include <cstdint>
 #include <limits>
@@ -54,6 +54,8 @@ NFTHistoryHandler::Result
 NFTHistoryHandler::process(NFTHistoryHandler::Input input, Context const& ctx) const
 {
     auto const range = sharedPtrBackend_->fetchLedgerRange();
+    ASSERT(range.has_value(), "NFTHistory's ledger range must be available");
+
     auto [minIndex, maxIndex] = *range;
 
     if (input.ledgerIndexMin) {
@@ -78,7 +80,7 @@ NFTHistoryHandler::process(NFTHistoryHandler::Input input, Context const& ctx) c
         if (input.ledgerIndexMax || input.ledgerIndexMin)
             return Error{Status{RippledError::rpcINVALID_PARAMS, "containsLedgerSpecifierAndRange"}};
 
-        auto const lgrInfoOrStatus = getLedgerInfoFromHashOrSeq(
+        auto const lgrInfoOrStatus = getLedgerHeaderFromHashOrSeq(
             *sharedPtrBackend_, ctx.yield, input.ledgerHash, input.ledgerIndex, range->maxSequence
         );
 
@@ -113,7 +115,7 @@ NFTHistoryHandler::process(NFTHistoryHandler::Input input, Context const& ctx) c
     auto const [blobs, retCursor] = txnsAndCursor;
 
     if (retCursor)
-        response.marker = {retCursor->ledgerSequence, retCursor->transactionIndex};
+        response.marker = {.ledger = retCursor->ledgerSequence, .seq = retCursor->transactionIndex};
 
     for (auto const& txnPlusMeta : blobs) {
         // over the range
@@ -230,8 +232,8 @@ tag_invoke(boost::json::value_to_tag<NFTHistoryHandler::Input>, boost::json::val
 
     if (jsonObject.contains(JS(marker))) {
         input.marker = NFTHistoryHandler::Marker{
-            jsonObject.at(JS(marker)).as_object().at(JS(ledger)).as_int64(),
-            jsonObject.at(JS(marker)).as_object().at(JS(seq)).as_int64()
+            .ledger = jsonObject.at(JS(marker)).as_object().at(JS(ledger)).as_int64(),
+            .seq = jsonObject.at(JS(marker)).as_object().at(JS(seq)).as_int64()
         };
     }
 

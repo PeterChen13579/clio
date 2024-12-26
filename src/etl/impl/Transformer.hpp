@@ -23,7 +23,7 @@
 #include "data/DBHelpers.hpp"
 #include "data/Types.hpp"
 #include "etl/SystemState.hpp"
-#include "etl/impl/AmendmentBlock.hpp"
+#include "etl/impl/AmendmentBlockHandler.hpp"
 #include "etl/impl/LedgerLoader.hpp"
 #include "util/Assert.hpp"
 #include "util/LedgerUtils.hpp"
@@ -31,11 +31,11 @@
 #include "util/log/Logger.hpp"
 
 #include <grpcpp/grpcpp.h>
-#include <ripple/basics/base_uint.h>
-#include <ripple/basics/strHex.h>
-#include <ripple/beast/core/CurrentThreadName.h>
-#include <ripple/proto/org/xrpl/rpc/v1/xrp_ledger.grpc.pb.h>
-#include <ripple/protocol/LedgerHeader.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/basics/strHex.h>
+#include <xrpl/beast/core/CurrentThreadName.h>
+#include <xrpl/proto/org/xrpl/rpc/v1/xrp_ledger.grpc.pb.h>
+#include <xrpl/protocol/LedgerHeader.h>
 
 #include <chrono>
 #include <cstdint>
@@ -158,10 +158,10 @@ private:
                 auto const end = std::chrono::system_clock::now();
                 auto const duration = ((end - start).count()) / 1000000000.0;
 
-                LOG(log_.info()) << "Load phase of etl : "
-                                 << "Successfully wrote ledger! Ledger info: " << util::toString(lgrInfo)
-                                 << ". txn count = " << numTxns << ". object count = " << numObjects
-                                 << ". load time = " << duration << ". load txns per second = " << numTxns / duration
+                LOG(log_.info()) << "Load phase of ETL. Successfully wrote ledger! Ledger info: "
+                                 << util::toString(lgrInfo) << ". txn count = " << numTxns
+                                 << ". object count = " << numObjects << ". load time = " << duration
+                                 << ". load txns per second = " << numTxns / duration
                                  << ". load objs per second = " << numObjects / duration;
 
                 // success is false if the ledger was already written
@@ -213,6 +213,7 @@ private:
         backend_->writeAccountTransactions(std::move(insertTxResultOp->accountTxData));
         backend_->writeNFTs(insertTxResultOp->nfTokensData);
         backend_->writeNFTTransactions(insertTxResultOp->nfTokenTxData);
+        backend_->writeMPTHolders(insertTxResultOp->mptHoldersData);
 
         auto [success, duration] =
             ::util::timed<std::chrono::duration<double>>([&]() { return backend_->finishWrites(lgrInfo.seq); });
@@ -258,7 +259,7 @@ private:
 
                 if (isDeleted) {
                     auto const old = backend_->cache().get(*key, lgrInfo.seq - 1);
-                    ASSERT(old.has_value(), "Deleted object must be in cache");
+                    ASSERT(old.has_value(), "Deleted object {} must be in cache", ripple::strHex(*key));
                     checkBookBase = isBookDir(*key, *old);
                 } else {
                     checkBookBase = isBookDir(*key, *blob);
@@ -307,11 +308,11 @@ private:
 
                 auto lb = backend_->cache().getPredecessor(obj.key, lgrInfo.seq);
                 if (!lb)
-                    lb = {data::firstKey, {}};
+                    lb = {.key = data::firstKey, .blob = {}};
 
                 auto ub = backend_->cache().getSuccessor(obj.key, lgrInfo.seq);
                 if (!ub)
-                    ub = {data::lastKey, {}};
+                    ub = {.key = data::lastKey, .blob = {}};
 
                 if (obj.blob.empty()) {
                     LOG(log_.debug()) << "writing successor for deleted object " << ripple::strHex(obj.key) << " - "

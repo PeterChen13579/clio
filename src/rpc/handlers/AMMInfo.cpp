@@ -28,6 +28,7 @@
 #include "rpc/common/Specs.hpp"
 #include "rpc/common/Types.hpp"
 #include "rpc/common/Validators.hpp"
+#include "util/Assert.hpp"
 
 #include <boost/json/array.hpp>
 #include <boost/json/conversion.hpp>
@@ -35,21 +36,20 @@
 #include <boost/json/value.hpp>
 #include <boost/json/value_to.hpp>
 #include <date/date.h>
-#include <ripple/basics/base_uint.h>
-#include <ripple/basics/chrono.h>
-#include <ripple/basics/strHex.h>
-#include <ripple/protocol/AMMCore.h>
-#include <ripple/protocol/AccountID.h>
-#include <ripple/protocol/ErrorCodes.h>
-#include <ripple/protocol/Indexes.h>
-#include <ripple/protocol/Issue.h>
-#include <ripple/protocol/LedgerHeader.h>
-#include <ripple/protocol/SField.h>
-#include <ripple/protocol/STAmount.h>
-#include <ripple/protocol/STBase.h>
-#include <ripple/protocol/STLedgerEntry.h>
-#include <ripple/protocol/Serializer.h>
-#include <ripple/protocol/jss.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/basics/chrono.h>
+#include <xrpl/basics/strHex.h>
+#include <xrpl/protocol/AMMCore.h>
+#include <xrpl/protocol/AccountID.h>
+#include <xrpl/protocol/Indexes.h>
+#include <xrpl/protocol/Issue.h>
+#include <xrpl/protocol/LedgerHeader.h>
+#include <xrpl/protocol/SField.h>
+#include <xrpl/protocol/STAmount.h>
+#include <xrpl/protocol/STBase.h>
+#include <xrpl/protocol/STLedgerEntry.h>
+#include <xrpl/protocol/Serializer.h>
+#include <xrpl/protocol/jss.h>
 
 #include <chrono>
 #include <cstdint>
@@ -95,14 +95,16 @@ AMMInfoHandler::process(AMMInfoHandler::Input input, Context const& ctx) const
         return Error{Status{RippledError::rpcINVALID_PARAMS}};
 
     auto const range = sharedPtrBackend_->fetchLedgerRange();
-    auto const lgrInfoOrStatus = getLedgerInfoFromHashOrSeq(
+    ASSERT(range.has_value(), "AMMInfo's ledger range must be available");
+
+    auto const lgrInfoOrStatus = getLedgerHeaderFromHashOrSeq(
         *sharedPtrBackend_, ctx.yield, input.ledgerHash, input.ledgerIndex, range->maxSequence
     );
 
     if (auto const status = std::get_if<Status>(&lgrInfoOrStatus))
         return Error{*status};
 
-    auto const lgrInfo = std::get<LedgerInfo>(lgrInfoOrStatus);
+    auto const lgrInfo = std::get<LedgerHeader>(lgrInfoOrStatus);
 
     if (input.accountID) {
         auto keylet = keylet::account(*input.accountID);
@@ -143,8 +145,8 @@ AMMInfoHandler::process(AMMInfoHandler::Input input, Context const& ctx) const
     // If the issue1 and issue2 are not specified, we need to get them from the AMM.
     // Otherwise we preserve the mapping of asset1 -> issue1 and asset2 -> issue2 as requested by the user.
     if (issue1 == ripple::noIssue() and issue2 == ripple::noIssue()) {
-        issue1 = amm[sfAsset];
-        issue2 = amm[sfAsset2];
+        issue1 = amm[sfAsset].get<Issue>();
+        issue2 = amm[sfAsset2].get<Issue>();
     }
 
     auto const [asset1Balance, asset2Balance] =
@@ -202,12 +204,22 @@ AMMInfoHandler::process(AMMInfoHandler::Input input, Context const& ctx) const
 
     if (!isXRP(asset1Balance)) {
         response.asset1Frozen = isFrozen(
-            *sharedPtrBackend_, lgrInfo.seq, ammAccountID, amm[sfAsset].currency, amm[sfAsset].account, ctx.yield
+            *sharedPtrBackend_,
+            lgrInfo.seq,
+            ammAccountID,
+            amm[sfAsset].get<Issue>().currency,
+            amm[sfAsset].get<Issue>().account,
+            ctx.yield
         );
     }
     if (!isXRP(asset2Balance)) {
         response.asset2Frozen = isFrozen(
-            *sharedPtrBackend_, lgrInfo.seq, ammAccountID, amm[sfAsset2].currency, amm[sfAsset2].account, ctx.yield
+            *sharedPtrBackend_,
+            lgrInfo.seq,
+            ammAccountID,
+            amm[sfAsset2].get<Issue>().currency,
+            amm[sfAsset2].get<Issue>().account,
+            ctx.yield
         );
     }
 
@@ -232,15 +244,17 @@ AMMInfoHandler::spec([[maybe_unused]] uint32_t apiVersion)
         }};
 
     static auto const rpcSpec = RpcSpec{
-        {JS(ledger_hash), validation::Uint256HexStringValidator},
-        {JS(ledger_index), validation::LedgerIndexValidator},
+        {JS(ledger_hash), validation::CustomValidators::Uint256HexStringValidator},
+        {JS(ledger_index), validation::CustomValidators::LedgerIndexValidator},
         {JS(asset),
          meta::WithCustomError{
              validation::Type<std::string, boost::json::object>{}, Status(RippledError::rpcISSUE_MALFORMED)
          },
          meta::IfType<std::string>{stringIssueValidator},
          meta::IfType<boost::json::object>{
-             meta::WithCustomError{validation::CurrencyIssueValidator, Status(RippledError::rpcISSUE_MALFORMED)},
+             meta::WithCustomError{
+                 validation::CustomValidators::CurrencyIssueValidator, Status(RippledError::rpcISSUE_MALFORMED)
+             },
          }},
         {JS(asset2),
          meta::WithCustomError{
@@ -248,10 +262,14 @@ AMMInfoHandler::spec([[maybe_unused]] uint32_t apiVersion)
          },
          meta::IfType<std::string>{stringIssueValidator},
          meta::IfType<boost::json::object>{
-             meta::WithCustomError{validation::CurrencyIssueValidator, Status(RippledError::rpcISSUE_MALFORMED)},
+             meta::WithCustomError{
+                 validation::CustomValidators::CurrencyIssueValidator, Status(RippledError::rpcISSUE_MALFORMED)
+             },
          }},
-        {JS(amm_account), meta::WithCustomError{validation::AccountValidator, Status(RippledError::rpcACT_MALFORMED)}},
-        {JS(account), meta::WithCustomError{validation::AccountValidator, Status(RippledError::rpcACT_MALFORMED)}},
+        {JS(amm_account),
+         meta::WithCustomError{validation::CustomValidators::AccountValidator, Status(RippledError::rpcACT_MALFORMED)}},
+        {JS(account),
+         meta::WithCustomError{validation::CustomValidators::AccountValidator, Status(RippledError::rpcACT_MALFORMED)}},
     };
 
     return rpcSpec;

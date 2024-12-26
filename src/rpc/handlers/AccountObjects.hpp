@@ -29,9 +29,9 @@
 
 #include <boost/json/conversion.hpp>
 #include <boost/json/value.hpp>
-#include <ripple/protocol/LedgerFormats.h>
-#include <ripple/protocol/STLedgerEntry.h>
-#include <ripple/protocol/jss.h>
+#include <xrpl/protocol/LedgerFormats.h>
+#include <xrpl/protocol/STLedgerEntry.h>
+#include <xrpl/protocol/jss.h>
 
 #include <cstdint>
 #include <memory>
@@ -54,10 +54,6 @@ namespace rpc {
 class AccountObjectsHandler {
     // dependencies
     std::shared_ptr<BackendInterface> sharedPtrBackend_;
-
-    // constants
-    static std::unordered_map<std::string, ripple::LedgerEntryType> const TYPES_MAP;
-    static std::unordered_set<std::string> const TYPES_KEYS;
 
 public:
     static auto constexpr LIMIT_MIN = 10;
@@ -111,19 +107,19 @@ public:
     static RpcSpecConstRef
     spec([[maybe_unused]] uint32_t apiVersion)
     {
-        auto const& ledgerTypeStrs = util::getLedgerEntryTypeStrs();
+        auto const& accountOwnedTypes = util::LedgerTypes::GetAccountOwnedLedgerTypeStrList();
         static auto const rpcSpec = RpcSpec{
-            {JS(account), validation::Required{}, validation::AccountValidator},
-            {JS(ledger_hash), validation::Uint256HexStringValidator},
-            {JS(ledger_index), validation::LedgerIndexValidator},
+            {JS(account), validation::Required{}, validation::CustomValidators::AccountValidator},
+            {JS(ledger_hash), validation::CustomValidators::Uint256HexStringValidator},
+            {JS(ledger_index), validation::CustomValidators::LedgerIndexValidator},
             {JS(limit),
              validation::Type<uint32_t>{},
              validation::Min(1u),
              modifiers::Clamp<int32_t>(LIMIT_MIN, LIMIT_MAX)},
             {JS(type),
              validation::Type<std::string>{},
-             validation::OneOf<std::string>(ledgerTypeStrs.cbegin(), ledgerTypeStrs.cend())},
-            {JS(marker), validation::AccountMarkerValidator},
+             validation::OneOf<std::string>(accountOwnedTypes.cbegin(), accountOwnedTypes.cend())},
+            {JS(marker), validation::CustomValidators::AccountMarkerValidator},
             {JS(deletion_blockers_only), validation::Type<bool>{}},
         };
 

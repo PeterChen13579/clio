@@ -23,19 +23,19 @@
 #include "rpc/JS.hpp"
 #include "rpc/RPCHelpers.hpp"
 #include "rpc/common/Types.hpp"
+#include "util/Assert.hpp"
 
 #include <boost/json/conversion.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
 #include <boost/json/value_to.hpp>
-#include <ripple/basics/base_uint.h>
-#include <ripple/basics/strHex.h>
-#include <ripple/protocol/AccountID.h>
-#include <ripple/protocol/ErrorCodes.h>
-#include <ripple/protocol/Indexes.h>
-#include <ripple/protocol/LedgerHeader.h>
-#include <ripple/protocol/jss.h>
-#include <ripple/protocol/nft.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/basics/strHex.h>
+#include <xrpl/protocol/AccountID.h>
+#include <xrpl/protocol/Indexes.h>
+#include <xrpl/protocol/LedgerHeader.h>
+#include <xrpl/protocol/jss.h>
+#include <xrpl/protocol/nft.h>
 
 #include <optional>
 #include <string>
@@ -49,13 +49,15 @@ NFTsByIssuerHandler::Result
 NFTsByIssuerHandler::process(NFTsByIssuerHandler::Input input, Context const& ctx) const
 {
     auto const range = sharedPtrBackend_->fetchLedgerRange();
-    auto const lgrInfoOrStatus = getLedgerInfoFromHashOrSeq(
+    ASSERT(range.has_value(), "NFTsByIssuer's ledger range must be available");
+
+    auto const lgrInfoOrStatus = getLedgerHeaderFromHashOrSeq(
         *sharedPtrBackend_, ctx.yield, input.ledgerHash, input.ledgerIndex, range->maxSequence
     );
     if (auto const status = std::get_if<Status>(&lgrInfoOrStatus))
         return Error{*status};
 
-    auto const lgrInfo = std::get<LedgerInfo>(lgrInfoOrStatus);
+    auto const lgrInfo = std::get<LedgerHeader>(lgrInfoOrStatus);
 
     auto const limit = input.limit.value_or(NFTsByIssuerHandler::LIMIT_DEFAULT);
 
@@ -86,13 +88,13 @@ NFTsByIssuerHandler::process(NFTsByIssuerHandler::Input input, Context const& ct
         nftJson[JS(nft_id)] = strHex(nft.tokenID);
         nftJson[JS(ledger_index)] = nft.ledgerSequence;
         nftJson[JS(owner)] = toBase58(nft.owner);
-        nftJson["is_burned"] = nft.isBurned;
+        nftJson[JS(is_burned)] = nft.isBurned;
         nftJson[JS(uri)] = strHex(nft.uri);
 
         nftJson[JS(flags)] = nft::getFlags(nft.tokenID);
         nftJson["transfer_fee"] = nft::getTransferFee(nft.tokenID);
         nftJson[JS(issuer)] = toBase58(nft::getIssuer(nft.tokenID));
-        nftJson["nft_taxon"] = nft::toUInt32(nft::getTaxon(nft.tokenID));
+        nftJson[JS(nft_taxon)] = nft::toUInt32(nft::getTaxon(nft.tokenID));
         nftJson[JS(nft_serial)] = nft::getSerial(nft.tokenID);
 
         output.nfts.push_back(nftJson);
@@ -119,7 +121,7 @@ tag_invoke(boost::json::value_from_tag, boost::json::value& jv, NFTsByIssuerHand
         jv.as_object()[JS(marker)] = *(output.marker);
 
     if (output.nftTaxon.has_value())
-        jv.as_object()["nft_taxon"] = *(output.nftTaxon);
+        jv.as_object()[JS(nft_taxon)] = *(output.nftTaxon);
 }
 
 NFTsByIssuerHandler::Input
@@ -144,8 +146,8 @@ tag_invoke(boost::json::value_to_tag<NFTsByIssuerHandler::Input>, boost::json::v
     if (jsonObject.contains(JS(limit)))
         input.limit = jsonObject.at(JS(limit)).as_int64();
 
-    if (jsonObject.contains("nft_taxon"))
-        input.nftTaxon = jsonObject.at("nft_taxon").as_int64();
+    if (jsonObject.contains(JS(nft_taxon)))
+        input.nftTaxon = jsonObject.at(JS(nft_taxon)).as_int64();
 
     if (jsonObject.contains(JS(marker)))
         input.marker = boost::json::value_to<std::string>(jsonObject.at(JS(marker)));

@@ -6,6 +6,7 @@ target_sources(
           Factories.cpp
           AMMHelpers.cpp
           RPCHelpers.cpp
+          CredentialHelpers.cpp
           Counters.cpp
           WorkQueue.cpp
           common/Specs.cpp
@@ -25,11 +26,15 @@ target_sources(
           handlers/BookChanges.cpp
           handlers/BookOffers.cpp
           handlers/DepositAuthorized.cpp
+          handlers/Feature.cpp
           handlers/GatewayBalances.cpp
+          handlers/GetAggregatePrice.cpp
           handlers/Ledger.cpp
           handlers/LedgerData.cpp
           handlers/LedgerEntry.cpp
+          handlers/LedgerIndex.cpp
           handlers/LedgerRange.cpp
+          handlers/MPTHolders.cpp
           handlers/NFTsByIssuer.cpp
           handlers/NFTBuyOffers.cpp
           handlers/NFTHistory.cpp
@@ -38,7 +43,9 @@ target_sources(
           handlers/NFTSellOffers.cpp
           handlers/NoRippleCheck.cpp
           handlers/Random.cpp
+          handlers/Subscribe.cpp
           handlers/TransactionEntry.cpp
+          handlers/Unsubscribe.cpp
 )
 
 target_link_libraries(clio_rpc PRIVATE clio_util)

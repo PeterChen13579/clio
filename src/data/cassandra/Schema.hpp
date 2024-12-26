@@ -98,10 +98,8 @@ public:
                      PRIMARY KEY (key, sequence) 
                   ) 
              WITH CLUSTERING ORDER BY (sequence DESC) 
-              AND default_time_to_live = {}
             )",
-            qualifiedTableName(settingsProvider_.get(), "objects"),
-            settingsProvider_.get().getTtl()
+            qualifiedTableName(settingsProvider_.get(), "objects")
         ));
 
         statements.emplace_back(fmt::format(
@@ -114,10 +112,8 @@ public:
                  transaction blob, 
                     metadata blob 
                   ) 
-             WITH default_time_to_live = {}
             )",
-            qualifiedTableName(settingsProvider_.get(), "transactions"),
-            settingsProvider_.get().getTtl()
+            qualifiedTableName(settingsProvider_.get(), "transactions")
         ));
 
         statements.emplace_back(fmt::format(
@@ -128,10 +124,8 @@ public:
                         hash blob, 
                      PRIMARY KEY (ledger_sequence, hash) 
                   ) 
-             WITH default_time_to_live = {}
             )",
-            qualifiedTableName(settingsProvider_.get(), "ledger_transactions"),
-            settingsProvider_.get().getTtl()
+            qualifiedTableName(settingsProvider_.get(), "ledger_transactions")
         ));
 
         statements.emplace_back(fmt::format(
@@ -143,10 +137,8 @@ public:
                    next blob, 
                 PRIMARY KEY (key, seq) 
                   ) 
-             WITH default_time_to_live = {}
             )",
-            qualifiedTableName(settingsProvider_.get(), "successor"),
-            settingsProvider_.get().getTtl()
+            qualifiedTableName(settingsProvider_.get(), "successor")
         ));
 
         statements.emplace_back(fmt::format(
@@ -157,10 +149,8 @@ public:
                     key blob,
                 PRIMARY KEY (seq, key) 
                   ) 
-             WITH default_time_to_live = {}
             )",
-            qualifiedTableName(settingsProvider_.get(), "diff"),
-            settingsProvider_.get().getTtl()
+            qualifiedTableName(settingsProvider_.get(), "diff")
         ));
 
         statements.emplace_back(fmt::format(
@@ -173,10 +163,8 @@ public:
                     PRIMARY KEY (account, seq_idx) 
                   ) 
              WITH CLUSTERING ORDER BY (seq_idx DESC)
-              AND default_time_to_live = {}
             )",
-            qualifiedTableName(settingsProvider_.get(), "account_tx"),
-            settingsProvider_.get().getTtl()
+            qualifiedTableName(settingsProvider_.get(), "account_tx")
         ));
 
         statements.emplace_back(fmt::format(
@@ -186,10 +174,8 @@ public:
                     sequence bigint PRIMARY KEY,
                       header blob
                   ) 
-             WITH default_time_to_live = {}
             )",
-            qualifiedTableName(settingsProvider_.get(), "ledgers"),
-            settingsProvider_.get().getTtl()
+            qualifiedTableName(settingsProvider_.get(), "ledgers")
         ));
 
         statements.emplace_back(fmt::format(
@@ -199,10 +185,8 @@ public:
                     hash blob PRIMARY KEY,
                 sequence bigint
                   ) 
-             WITH default_time_to_live = {}
             )",
-            qualifiedTableName(settingsProvider_.get(), "ledger_hashes"),
-            settingsProvider_.get().getTtl()
+            qualifiedTableName(settingsProvider_.get(), "ledger_hashes")
         ));
 
         statements.emplace_back(fmt::format(
@@ -227,10 +211,8 @@ public:
                      PRIMARY KEY (token_id, sequence) 
                   ) 
              WITH CLUSTERING ORDER BY (sequence DESC)
-              AND default_time_to_live = {}
             )",
-            qualifiedTableName(settingsProvider_.get(), "nf_tokens"),
-            settingsProvider_.get().getTtl()
+            qualifiedTableName(settingsProvider_.get(), "nf_tokens")
         ));
 
         statements.emplace_back(fmt::format(
@@ -243,10 +225,8 @@ public:
                      PRIMARY KEY (issuer, taxon, token_id)
                   ) 
              WITH CLUSTERING ORDER BY (taxon ASC, token_id ASC)
-              AND default_time_to_live = {}
             )",
-            qualifiedTableName(settingsProvider_.get(), "issuer_nf_tokens_v2"),
-            settingsProvider_.get().getTtl()
+            qualifiedTableName(settingsProvider_.get(), "issuer_nf_tokens_v2")
         ));
 
         statements.emplace_back(fmt::format(
@@ -259,10 +239,8 @@ public:
                      PRIMARY KEY (token_id, sequence)
                   ) 
              WITH CLUSTERING ORDER BY (sequence DESC)
-              AND default_time_to_live = {}
             )",
-            qualifiedTableName(settingsProvider_.get(), "nf_token_uris"),
-            settingsProvider_.get().getTtl()
+            qualifiedTableName(settingsProvider_.get(), "nf_token_uris")
         ));
 
         statements.emplace_back(fmt::format(
@@ -275,10 +253,33 @@ public:
                      PRIMARY KEY (token_id, seq_idx) 
                   ) 
              WITH CLUSTERING ORDER BY (seq_idx DESC)
-              AND default_time_to_live = {}
             )",
-            qualifiedTableName(settingsProvider_.get(), "nf_token_transactions"),
-            settingsProvider_.get().getTtl()
+            qualifiedTableName(settingsProvider_.get(), "nf_token_transactions")
+        ));
+
+        statements.emplace_back(fmt::format(
+            R"(
+           CREATE TABLE IF NOT EXISTS {}
+                  ( 
+                    mpt_id blob,
+                    holder blob,
+                   PRIMARY KEY (mpt_id, holder)
+                  ) 
+             WITH CLUSTERING ORDER BY (holder ASC)
+            )",
+            qualifiedTableName(settingsProvider_.get(), "mp_token_holders")
+        ));
+
+        statements.emplace_back(fmt::format(
+            R"(
+           CREATE TABLE IF NOT EXISTS {}
+                  ( 
+                   migrator_name TEXT,
+                          status TEXT,
+                         PRIMARY KEY (migrator_name)
+                  ) 
+            )",
+            qualifiedTableName(settingsProvider_.get(), "migrator_status")
         ));
 
         return statements;
@@ -417,6 +418,17 @@ public:
             ));
         }();
 
+        PreparedStatement insertMPTHolder = [this]() {
+            return handle_.get().prepare(fmt::format(
+                R"(
+                INSERT INTO {} 
+                       (mpt_id, holder)
+                VALUES (?, ?)
+                )",
+                qualifiedTableName(settingsProvider_.get(), "mp_token_holders")
+            ));
+        }();
+
         PreparedStatement insertLedgerHeader = [this]() {
             return handle_.get().prepare(fmt::format(
                 R"(
@@ -463,6 +475,17 @@ public:
                  WHERE is_latest = false
                 )",
                 qualifiedTableName(settingsProvider_.get(), "ledger_range")
+            ));
+        }();
+
+        PreparedStatement insertMigratorStatus = [this]() {
+            return handle_.get().prepare(fmt::format(
+                R"(
+                INSERT INTO {}
+                       (migrator_name, status)
+                VALUES (?, ?)
+                )",
+                qualifiedTableName(settingsProvider_.get(), "migrator_status")
             ));
         }();
 
@@ -711,6 +734,20 @@ public:
             ));
         }();
 
+        PreparedStatement selectMPTHolders = [this]() {
+            return handle_.get().prepare(fmt::format(
+                R"(
+                SELECT holder
+                  FROM {}    
+                 WHERE mpt_id = ?
+                   AND holder > ?
+              ORDER BY holder ASC
+                 LIMIT ?
+                )",
+                qualifiedTableName(settingsProvider_.get(), "mp_token_holders")
+            ));
+        }();
+
         PreparedStatement selectLedgerByHash = [this]() {
             return handle_.get().prepare(fmt::format(
                 R"(
@@ -752,6 +789,17 @@ public:
                   FROM {}
                 )",
                 qualifiedTableName(settingsProvider_.get(), "ledger_range")
+            ));
+        }();
+
+        PreparedStatement selectMigratorStatus = [this]() {
+            return handle_.get().prepare(fmt::format(
+                R"(
+                SELECT status
+                  FROM {}
+                 WHERE migrator_name = ?
+                )",
+                qualifiedTableName(settingsProvider_.get(), "migrator_status")
             ));
         }();
     };

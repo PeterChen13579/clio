@@ -19,29 +19,36 @@
 
 #include "etl/impl/SubscriptionSource.hpp"
 
+#include "etl/NetworkValidatedLedgersInterface.hpp"
+#include "feed/SubscriptionManagerInterface.hpp"
 #include "rpc/JS.hpp"
-#include "util/Expected.hpp"
 #include "util/Retry.hpp"
 #include "util/log/Logger.hpp"
+#include "util/prometheus/Label.hpp"
+#include "util/prometheus/Prometheus.hpp"
 #include "util/requests/Types.hpp"
 
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/executor_work_guard.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/spawn.hpp>
+#include <boost/asio/strand.hpp>
 #include <boost/asio/use_future.hpp>
+#include <boost/beast/http/field.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/parse.hpp>
 #include <boost/json/serialize.hpp>
 #include <boost/json/value_to.hpp>
 #include <fmt/core.h>
-#include <ripple/protocol/jss.h>
+#include <xrpl/protocol/jss.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <expected>
 #include <future>
 #include <memory>
 #include <optional>
@@ -51,6 +58,39 @@
 #include <vector>
 
 namespace etl::impl {
+
+SubscriptionSource::SubscriptionSource(
+    boost::asio::io_context& ioContext,
+    std::string const& ip,
+    std::string const& wsPort,
+    std::shared_ptr<NetworkValidatedLedgersInterface> validatedLedgers,
+    std::shared_ptr<feed::SubscriptionManagerInterface> subscriptions,
+    OnConnectHook onConnect,
+    OnDisconnectHook onDisconnect,
+    OnLedgerClosedHook onLedgerClosed,
+    std::chrono::steady_clock::duration const wsTimeout,
+    std::chrono::steady_clock::duration const retryDelay
+)
+    : log_(fmt::format("SubscriptionSource[{}:{}]", ip, wsPort))
+    , wsConnectionBuilder_(ip, wsPort)
+    , validatedLedgers_(std::move(validatedLedgers))
+    , subscriptions_(std::move(subscriptions))
+    , strand_(boost::asio::make_strand(ioContext))
+    , wsTimeout_(wsTimeout)
+    , retry_(util::makeRetryExponentialBackoff(retryDelay, RETRY_MAX_DELAY, strand_))
+    , onConnect_(std::move(onConnect))
+    , onDisconnect_(std::move(onDisconnect))
+    , onLedgerClosed_(std::move(onLedgerClosed))
+    , lastMessageTimeSecondsSinceEpoch_(PrometheusService::gaugeInt(
+          "subscription_source_last_message_time",
+          util::prometheus::Labels({{"source", fmt::format("{}:{}", ip, wsPort)}}),
+          "Seconds since epoch of the last message received from rippled subscription streams"
+      ))
+{
+    wsConnectionBuilder_.addHeader({boost::beast::http::field::user_agent, "clio-client"})
+        .addHeader({"X-User", "clio-client"})
+        .setConnectionTimeout(wsTimeout_);
+}
 
 SubscriptionSource::~SubscriptionSource()
 {
@@ -91,10 +131,17 @@ SubscriptionSource::isConnected() const
     return isConnected_;
 }
 
+bool
+SubscriptionSource::isForwarding() const
+{
+    return isForwarding_;
+}
+
 void
 SubscriptionSource::setForwarding(bool isForwarding)
 {
     isForwarding_ = isForwarding;
+    LOG(log_.info()) << "Forwarding set to " << isForwarding_;
 }
 
 std::chrono::steady_clock::time_point
@@ -128,20 +175,22 @@ SubscriptionSource::subscribe()
             }
 
             wsConnection_ = std::move(connection).value();
-            isConnected_ = true;
-            onConnect_();
 
             auto const& subscribeCommand = getSubscribeCommandJson();
-            auto const writeErrorOpt = wsConnection_->write(subscribeCommand, yield);
+            auto const writeErrorOpt = wsConnection_->write(subscribeCommand, yield, wsTimeout_);
             if (writeErrorOpt) {
                 handleError(writeErrorOpt.value(), yield);
                 return;
             }
 
+            isConnected_ = true;
+            LOG(log_.info()) << "Connected";
+            onConnect_();
+
             retry_.reset();
 
             while (!stop_) {
-                auto const message = wsConnection_->read(yield);
+                auto const message = wsConnection_->read(yield, wsTimeout_);
                 if (not message) {
                     handleError(message.error(), yield);
                     return;
@@ -186,10 +235,11 @@ SubscriptionSource::handleMessage(std::string const& message)
                 auto validatedLedgers = boost::json::value_to<std::string>(result.at(JS(validated_ledgers)));
                 setValidatedRange(std::move(validatedLedgers));
             }
-            LOG(log_.info()) << "Received a message on ledger subscription stream. Message : " << object;
+            LOG(log_.debug()) << "Received a message on ledger subscription stream. Message: " << object;
 
         } else if (object.contains(JS(type)) && object.at(JS(type)) == JS_LedgerClosed) {
-            LOG(log_.info()) << "Received a message on ledger subscription stream. Message : " << object;
+            LOG(log_.debug()) << "Received a message of type 'ledgerClosed' on ledger subscription stream. Message: "
+                              << object;
             if (object.contains(JS(ledger_index))) {
                 ledgerIndex = object.at(JS(ledger_index)).as_int64();
             }
@@ -202,24 +252,31 @@ SubscriptionSource::handleMessage(std::string const& message)
 
         } else {
             if (isForwarding_) {
-                if (object.contains(JS(transaction))) {
-                    dependencies_.forwardProposedTransaction(object);
+                // Clio as rippled's proposed_transactions subscirber, will receive two jsons for each transaction
+                // 1 - Proposed transaction
+                // 2 - Validated transaction
+                // Only forward proposed transaction, validated transactions are sent by Clio itself
+                if (object.contains(JS(transaction)) and !object.contains(JS(meta))) {
+                    LOG(log_.debug()) << "Forwarding proposed transaction: " << object;
+                    subscriptions_->forwardProposedTransaction(object);
                 } else if (object.contains(JS(type)) && object.at(JS(type)) == JS_ValidationReceived) {
-                    dependencies_.forwardValidation(object);
+                    LOG(log_.debug()) << "Forwarding validation: " << object;
+                    subscriptions_->forwardValidation(object);
                 } else if (object.contains(JS(type)) && object.at(JS(type)) == JS_ManifestReceived) {
-                    dependencies_.forwardManifest(object);
+                    LOG(log_.debug()) << "Forwarding manifest: " << object;
+                    subscriptions_->forwardManifest(object);
                 }
             }
         }
 
         if (ledgerIndex != 0) {
             LOG(log_.trace()) << "Pushing ledger sequence = " << ledgerIndex;
-            dependencies_.pushValidatedLedger(ledgerIndex);
+            validatedLedgers_->push(ledgerIndex);
         }
 
         return std::nullopt;
     } catch (std::exception const& e) {
-        LOG(log_.error()) << "Exception in handleMessage : " << e.what();
+        LOG(log_.error()) << "Exception in handleMessage: " << e.what();
         return util::requests::RequestError{fmt::format("Error handling message: {}", e.what())};
     }
 }
@@ -228,16 +285,14 @@ void
 SubscriptionSource::handleError(util::requests::RequestError const& error, boost::asio::yield_context yield)
 {
     isConnected_ = false;
+    bool const wasForwarding = isForwarding_.exchange(false);
     if (not stop_) {
-        onDisconnect_();
-        isForwarding_ = false;
+        LOG(log_.info()) << "Disconnected";
+        onDisconnect_(wasForwarding);
     }
 
     if (wsConnection_ != nullptr) {
-        auto const error = wsConnection_->close(yield);
-        if (error) {
-            LOG(log_.error()) << "Error closing websocket connection: " << error->message();
-        }
+        wsConnection_->close(yield);
         wsConnection_.reset();
     }
 
@@ -264,7 +319,11 @@ SubscriptionSource::logError(util::requests::RequestError const& error) const
 void
 SubscriptionSource::setLastMessageTime()
 {
-    lastMessageTime_.lock().get() = std::chrono::steady_clock::now();
+    lastMessageTimeSecondsSinceEpoch_.get().set(
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count()
+    );
+    auto lock = lastMessageTime_.lock();
+    lock.get() = std::chrono::steady_clock::now();
 }
 
 void
@@ -294,7 +353,7 @@ SubscriptionSource::setValidatedRange(std::string range)
             pairs.emplace_back(min, max);
         }
     }
-    std::sort(pairs.begin(), pairs.end(), [](auto left, auto right) { return left.first < right.first; });
+    std::ranges::sort(pairs, [](auto left, auto right) { return left.first < right.first; });
 
     auto dataLock = validatedLedgersData_.lock();
     dataLock->validatedLedgers = std::move(pairs);

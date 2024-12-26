@@ -23,12 +23,13 @@
 #include "data/cassandra/impl/Collection.hpp"
 #include "data/cassandra/impl/ManagedObject.hpp"
 #include "data/cassandra/impl/Tuple.hpp"
+#include "util/UnsupportedType.hpp"
 
 #include <cassandra.h>
 #include <fmt/core.h>
-#include <ripple/basics/base_uint.h>
-#include <ripple/protocol/AccountID.h>
-#include <ripple/protocol/STAccount.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/protocol/AccountID.h>
+#include <xrpl/protocol/STAccount.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -44,9 +45,6 @@ namespace data::cassandra::impl {
 class Statement : public ManagedObject<CassStatement> {
     static constexpr auto deleter = [](CassStatement* ptr) { cass_statement_free(ptr); };
 
-    template <typename>
-    static constexpr bool unsupported_v = false;
-
 public:
     /**
      * @brief Construct a new statement with optionally provided arguments.
@@ -56,7 +54,7 @@ public:
      */
     template <typename... Args>
     explicit Statement(std::string_view query, Args&&... args)
-        : ManagedObject{cass_statement_new(query.data(), sizeof...(args)), deleter}
+        : ManagedObject{cass_statement_new_n(query.data(), query.size(), sizeof...(args)), deleter}
     {
         cass_statement_set_consistency(*this, CASS_CONSISTENCY_QUORUM);
         cass_statement_set_is_idempotent(*this, cass_true);
@@ -108,9 +106,9 @@ public:
         using UintByteTupleType = std::tuple<uint32_t, ripple::uint256>;
         using ByteVectorType = std::vector<ripple::uint256>;
 
-        if constexpr (std::is_same_v<DecayedType, ripple::uint256>) {
+        if constexpr (std::is_same_v<DecayedType, ripple::uint256> || std::is_same_v<DecayedType, ripple::uint192>) {
             auto const rc = bindBytes(value.data(), value.size());
-            throwErrorIfNeeded(rc, "Bind ripple::uint256");
+            throwErrorIfNeeded(rc, "Bind ripple::base_uint");
         } else if constexpr (std::is_same_v<DecayedType, ripple::AccountID>) {
             auto const rc = bindBytes(value.data(), value.size());
             throwErrorIfNeeded(rc, "Bind ripple::AccountID");
@@ -121,6 +119,9 @@ public:
             // reinterpret_cast is needed here :'(
             auto const rc = bindBytes(reinterpret_cast<unsigned char const*>(value.data()), value.size());
             throwErrorIfNeeded(rc, "Bind string (as bytes)");
+        } else if constexpr (std::is_convertible_v<DecayedType, Text>) {
+            auto const rc = cass_statement_bind_string_n(*this, idx, value.text.c_str(), value.text.size());
+            throwErrorIfNeeded(rc, "Bind string (as TEXT)");
         } else if constexpr (std::is_same_v<DecayedType, UintTupleType> ||
                              std::is_same_v<DecayedType, UintByteTupleType>) {
             auto const rc = cass_statement_bind_tuple(*this, idx, Tuple{std::forward<Type>(value)});
@@ -141,7 +142,7 @@ public:
             throwErrorIfNeeded(rc, "Bind int64");
         } else {
             // type not supported for binding
-            static_assert(unsupported_v<DecayedType>);
+            static_assert(util::Unsupported<DecayedType>);
         }
     }
 };

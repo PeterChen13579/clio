@@ -22,7 +22,6 @@
 #include "data/BackendInterface.hpp"
 #include "data/DBHelpers.hpp"
 #include "data/Types.hpp"
-#include "data/cassandra/Concepts.hpp"
 #include "data/cassandra/Handle.hpp"
 #include "data/cassandra/Schema.hpp"
 #include "data/cassandra/SettingsProvider.hpp"
@@ -36,13 +35,13 @@
 #include <boost/asio/spawn.hpp>
 #include <boost/json/object.hpp>
 #include <cassandra.h>
-#include <ripple/basics/Blob.h>
-#include <ripple/basics/base_uint.h>
-#include <ripple/basics/strHex.h>
-#include <ripple/protocol/AccountID.h>
-#include <ripple/protocol/Indexes.h>
-#include <ripple/protocol/LedgerHeader.h>
-#include <ripple/protocol/nft.h>
+#include <xrpl/basics/Blob.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/basics/strHex.h>
+#include <xrpl/protocol/AccountID.h>
+#include <xrpl/protocol/Indexes.h>
+#include <xrpl/protocol/LedgerHeader.h>
+#include <xrpl/protocol/nft.h>
 
 #include <atomic>
 #include <chrono>
@@ -73,12 +72,14 @@ class BasicCassandraBackend : public BackendInterface {
 
     SettingsProviderType settingsProvider_;
     Schema<SettingsProviderType> schema_;
+
+    std::atomic_uint32_t ledgerSequence_ = 0u;
+
+protected:
     Handle handle_;
 
     // have to be mutable because BackendInterface constness :(
     mutable ExecutionStrategyType executor_;
-
-    std::atomic_uint32_t ledgerSequence_ = 0u;
 
 public:
     /**
@@ -94,7 +95,7 @@ public:
         , executor_{settingsProvider_.getSettings(), handle_}
     {
         if (auto const res = handle_.connect(); not res)
-            throw std::runtime_error("Could not connect to Cassandra: " + res.error());
+            throw std::runtime_error("Could not connect to database: " + res.error());
 
         if (not readOnly) {
             if (auto const res = handle_.execute(schema_.createKeyspace); not res) {
@@ -129,7 +130,7 @@ public:
     {
         auto rng = fetchLedgerRange();
         if (!rng)
-            return {{}, {}};
+            return {.txns = {}, .cursor = {}};
 
         Statement const statement = [this, forward, &account]() {
             if (forward)
@@ -172,11 +173,6 @@ public:
             if (--numRows == 0) {
                 LOG(log_.debug()) << "Setting cursor";
                 cursor = data;
-
-                // forward queries by ledger/tx sequence `>=`
-                // so we have to advance the index by one
-                if (forward)
-                    ++cursor->transactionIndex;
             }
         }
 
@@ -211,13 +207,13 @@ public:
     }
 
     void
-    writeLedger(ripple::LedgerHeader const& ledgerInfo, std::string&& blob) override
+    writeLedger(ripple::LedgerHeader const& ledgerHeader, std::string&& blob) override
     {
-        executor_.write(schema_->insertLedgerHeader, ledgerInfo.seq, std::move(blob));
+        executor_.write(schema_->insertLedgerHeader, ledgerHeader.seq, std::move(blob));
 
-        executor_.write(schema_->insertLedgerHash, ledgerInfo.hash, ledgerInfo.seq);
+        executor_.write(schema_->insertLedgerHash, ledgerHeader.hash, ledgerHeader.seq);
 
-        ledgerSequence_ = ledgerInfo.seq;
+        ledgerSequence_ = ledgerHeader.seq;
     }
 
     std::optional<std::uint32_t>
@@ -341,8 +337,8 @@ public:
 
         auto const& result = res.value();
         if (not result.hasRows()) {
-            LOG(log_.error()) << "Could not fetch all transaction hashes - no rows; ledger = "
-                              << std::to_string(ledgerSequence);
+            LOG(log_.warn()) << "Could not fetch all transaction hashes - no rows; ledger = "
+                             << std::to_string(ledgerSequence);
             return {};
         }
 
@@ -351,7 +347,7 @@ public:
             hashes.push_back(std::move(hash));
 
         auto end = std::chrono::system_clock::now();
-        LOG(log_.debug()) << "Fetched " << hashes.size() << " transaction hashes from Cassandra in "
+        LOG(log_.debug()) << "Fetched " << hashes.size() << " transaction hashes from database in "
                           << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
                           << " milliseconds";
 
@@ -405,7 +401,7 @@ public:
     {
         auto rng = fetchLedgerRange();
         if (!rng)
-            return {{}, {}};
+            return {.txns = {}, .cursor = {}};
 
         Statement const statement = [this, forward, &tokenID]() {
             if (forward)
@@ -553,6 +549,45 @@ public:
         return ret;
     }
 
+    MPTHoldersAndCursor
+    fetchMPTHolders(
+        ripple::uint192 const& mptID,
+        std::uint32_t const limit,
+        std::optional<ripple::AccountID> const& cursorIn,
+        std::uint32_t const ledgerSequence,
+        boost::asio::yield_context yield
+    ) const override
+    {
+        auto const holderEntries = executor_.read(
+            yield, schema_->selectMPTHolders, mptID, cursorIn.value_or(ripple::AccountID(0)), Limit{limit}
+        );
+
+        auto const& holderResults = holderEntries.value();
+        if (not holderResults.hasRows()) {
+            LOG(log_.debug()) << "No rows returned";
+            return {};
+        }
+
+        std::vector<ripple::uint256> mptKeys;
+        std::optional<ripple::AccountID> cursor;
+        for (auto const [holder] : extract<ripple::AccountID>(holderResults)) {
+            mptKeys.push_back(ripple::keylet::mptoken(mptID, holder).key);
+            cursor = holder;
+        }
+
+        auto mptObjects = doFetchLedgerObjects(mptKeys, ledgerSequence, yield);
+
+        auto it = std::remove_if(mptObjects.begin(), mptObjects.end(), [](Blob const& mpt) { return mpt.empty(); });
+
+        mptObjects.erase(it, mptObjects.end());
+
+        ASSERT(mptKeys.size() <= limit, "Number of keys can't exceed the limit");
+        if (mptKeys.size() == limit)
+            return {mptObjects, cursor};
+
+        return {mptObjects, {}};
+    }
+
     std::optional<Blob>
     doFetchLedgerObject(ripple::uint256 const& key, std::uint32_t const sequence, boost::asio::yield_context yield)
         const override
@@ -561,12 +596,31 @@ public:
         if (auto const res = executor_.read(yield, schema_->selectObject, key, sequence); res) {
             if (auto const result = res->template get<Blob>(); result) {
                 if (result->size())
-                    return *result;
+                    return result;
             } else {
                 LOG(log_.debug()) << "Could not fetch ledger object - no rows";
             }
         } else {
             LOG(log_.error()) << "Could not fetch ledger object: " << res.error();
+        }
+
+        return std::nullopt;
+    }
+
+    std::optional<std::uint32_t>
+    doFetchLedgerObjectSeq(ripple::uint256 const& key, std::uint32_t const sequence, boost::asio::yield_context yield)
+        const override
+    {
+        LOG(log_.debug()) << "Fetching ledger object for seq " << sequence << ", key = " << ripple::to_string(key);
+        if (auto const res = executor_.read(yield, schema_->selectObject, key, sequence); res) {
+            if (auto const result = res->template get<Blob, std::uint32_t>(); result) {
+                auto [_, seq] = result.value();
+                return seq;
+            }
+            LOG(log_.debug()) << "Could not fetch ledger object sequence - no rows";
+
+        } else {
+            LOG(log_.error()) << "Could not fetch ledger object sequence: " << res.error();
         }
 
         return std::nullopt;
@@ -597,7 +651,7 @@ public:
             if (auto const result = res->template get<ripple::uint256>(); result) {
                 if (*result == lastKey)
                     return std::nullopt;
-                return *result;
+                return result;
             }
 
             LOG(log_.debug()) << "Could not fetch successor - no rows";
@@ -645,7 +699,7 @@ public:
         });
 
         ASSERT(numHashes == results.size(), "Number of hashes and results must match");
-        LOG(log_.debug()) << "Fetched " << numHashes << " transactions from Cassandra in " << timeDiff
+        LOG(log_.debug()) << "Fetched " << numHashes << " transactions from database in " << timeDiff
                           << " milliseconds";
         return results;
     }
@@ -765,7 +819,7 @@ public:
         if (keys.empty())
             return {};
 
-        LOG(log_.debug()) << "Fetched " << keys.size() << " diff hashes from Cassandra in " << timeDiff
+        LOG(log_.debug()) << "Fetched " << keys.size() << " diff hashes from database in " << timeDiff
                           << " milliseconds";
 
         auto const objs = fetchLedgerObjects(keys, ledgerSequence, yield);
@@ -781,6 +835,26 @@ public:
         );
 
         return results;
+    }
+
+    std::optional<std::string>
+    fetchMigratorStatus(std::string const& migratorName, boost::asio::yield_context yield) const override
+    {
+        auto const res = executor_.read(yield, schema_->selectMigratorStatus, Text(migratorName));
+        if (not res) {
+            LOG(log_.error()) << "Could not fetch migrator status: " << res.error();
+            return {};
+        }
+
+        auto const& results = res.value();
+        if (not results) {
+            return {};
+        }
+
+        for (auto [statusString] : extract<std::string>(results))
+            return statusString;
+
+        return {};
     }
 
     void
@@ -853,7 +927,7 @@ public:
         std::string&& metadata
     ) override
     {
-        LOG(log_.trace()) << "Writing txn to cassandra";
+        LOG(log_.trace()) << "Writing txn to database";
 
         executor_.write(schema_->insertLedgerTransaction, seq, hash);
         executor_.write(
@@ -893,10 +967,29 @@ public:
     }
 
     void
+    writeMPTHolders(std::vector<MPTHolderData> const& data) override
+    {
+        std::vector<Statement> statements;
+        statements.reserve(data.size());
+        for (auto [mptId, holder] : data)
+            statements.push_back(schema_->insertMPTHolder.bind(std::move(mptId), std::move(holder)));
+
+        executor_.write(std::move(statements));
+    }
+
+    void
     startWrites() const override
     {
         // Note: no-op in original implementation too.
         // probably was used in PG to start a transaction or smth.
+    }
+
+    void
+    writeMigratorStatus(std::string const& migratorName, std::string const& status) override
+    {
+        executor_.writeSync(
+            schema_->insertMigratorStatus, data::cassandra::Text{migratorName}, data::cassandra::Text(status)
+        );
     }
 
     bool

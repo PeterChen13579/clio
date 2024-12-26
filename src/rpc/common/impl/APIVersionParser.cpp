@@ -19,33 +19,44 @@
 
 #include "rpc/common/impl/APIVersionParser.hpp"
 
-#include "rpc/common/APIVersion.hpp"
-#include "util/Expected.hpp"
 #include "util/log/Logger.hpp"
+#include "util/newconfig/ObjectView.hpp"
 
 #include <boost/json/object.hpp>
 #include <fmt/core.h>
 
 #include <cstdint>
+#include <expected>
 #include <string>
 
 using namespace std;
 
 namespace rpc::impl {
 
-ProductionAPIVersionParser::ProductionAPIVersionParser(util::Config const& config)
+ProductionAPIVersionParser::ProductionAPIVersionParser(
+    uint32_t defaultVersion,
+    uint32_t minVersion,
+    uint32_t maxVersion
+)
+    : defaultVersion_{defaultVersion}, minVersion_{minVersion}, maxVersion_{maxVersion}
+{
+    LOG(log_.info()) << "API version settings: [min = " << minVersion_ << "; max = " << maxVersion_
+                     << "; default = " << defaultVersion_ << "]";
+}
+
+ProductionAPIVersionParser::ProductionAPIVersionParser(util::config::ObjectView const& config)
     : ProductionAPIVersionParser(
-          config.valueOr("default", API_VERSION_DEFAULT),
-          config.valueOr("min", API_VERSION_MIN),
-          config.valueOr("max", API_VERSION_MAX)
+          config.get<uint32_t>("default"),
+          config.get<uint32_t>("min"),
+          config.get<uint32_t>("max")
       )
 {
 }
 
-util::Expected<uint32_t, std::string>
+std::expected<uint32_t, std::string>
 ProductionAPIVersionParser::parse(boost::json::object const& request) const
 {
-    using Error = util::Unexpected<std::string>;
+    using Error = std::unexpected<std::string>;
 
     if (request.contains("api_version")) {
         if (!request.at("api_version").is_int64())

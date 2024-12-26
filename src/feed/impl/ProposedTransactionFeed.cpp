@@ -23,10 +23,9 @@
 #include "rpc/RPCHelpers.hpp"
 #include "util/log/Logger.hpp"
 
-#include <boost/asio/post.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/serialize.hpp>
-#include <ripple/protocol/AccountID.h>
+#include <xrpl/protocol/AccountID.h>
 
 #include <cstdint>
 #include <memory>
@@ -47,9 +46,9 @@ ProposedTransactionFeed::sub(SubscriberSharedPtr const& subscriber)
     });
 
     if (added) {
-        LOG(logger_.debug()) << subscriber->tag() << "Subscribed tx_proposed";
+        LOG(logger_.info()) << subscriber->tag() << "Subscribed tx_proposed";
         ++subAllCount_.get();
-        subscriber->onDisconnect.connect([this](SubscriberPtr connection) { unsubInternal(connection); });
+        subscriber->onDisconnect([this](SubscriberPtr connection) { unsubInternal(connection); });
     }
 }
 
@@ -72,11 +71,9 @@ ProposedTransactionFeed::sub(ripple::AccountID const& account, SubscriberSharedP
         }
     );
     if (added) {
-        LOG(logger_.debug()) << subscriber->tag() << "Subscribed accounts_proposed " << account;
+        LOG(logger_.info()) << subscriber->tag() << "Subscribed accounts_proposed " << account;
         ++subAccountCount_.get();
-        subscriber->onDisconnect.connect([this, account](SubscriberPtr connection) {
-            unsubInternal(account, connection);
-        });
+        subscriber->onDisconnect([this, account](SubscriberPtr connection) { unsubInternal(account, connection); });
     }
 }
 
@@ -101,16 +98,18 @@ ProposedTransactionFeed::pub(boost::json::object const& receivedTxJson)
     auto const accounts = rpc::getAccountsFromTransaction(transaction);
     auto affectedAccounts = std::unordered_set<ripple::AccountID>(accounts.cbegin(), accounts.cend());
 
-    boost::asio::post(strand_, [this, pubMsg = std::move(pubMsg), affectedAccounts = std::move(affectedAccounts)]() {
-        signal_.emit(pubMsg);
-        // Prevent the same connection from receiving the same message twice if it is subscribed to multiple accounts
-        // However, if the same connection subscribe both stream and account, it will still receive the message twice.
-        // notified_ can be cleared before signal_ emit to improve this, but let's keep it as is for now, since rippled
-        // acts like this.
-        notified_.clear();
-        for (auto const& account : affectedAccounts)
-            accountSignal_.emit(account, pubMsg);
-    });
+    [[maybe_unused]] auto task =
+        strand_.execute([this, pubMsg = std::move(pubMsg), affectedAccounts = std::move(affectedAccounts)]() {
+            notified_.clear();
+            signal_.emit(pubMsg);
+            // Prevent the same connection from receiving the same message twice if it is subscribed to multiple
+            // accounts However, if the same connection subscribe both stream and account, it will still receive the
+            // message twice. notified_ can be cleared before signal_ emit to improve this, but let's keep it as is for
+            // now, since rippled acts like this.
+            notified_.clear();
+            for (auto const& account : affectedAccounts)
+                accountSignal_.emit(account, pubMsg);
+        });
 }
 
 std::uint64_t
@@ -129,7 +128,7 @@ void
 ProposedTransactionFeed::unsubInternal(SubscriberPtr subscriber)
 {
     if (signal_.disconnect(subscriber)) {
-        LOG(logger_.debug()) << subscriber->tag() << "Unsubscribed tx_proposed";
+        LOG(logger_.info()) << subscriber->tag() << "Unsubscribed tx_proposed";
         --subAllCount_.get();
     }
 }
@@ -138,7 +137,7 @@ void
 ProposedTransactionFeed::unsubInternal(ripple::AccountID const& account, SubscriberPtr subscriber)
 {
     if (accountSignal_.disconnect(subscriber, account)) {
-        LOG(logger_.debug()) << subscriber->tag() << "Unsubscribed accounts_proposed " << account;
+        LOG(logger_.info()) << subscriber->tag() << "Unsubscribed accounts_proposed " << account;
         --subAccountCount_.get();
     }
 }

@@ -22,11 +22,8 @@
 #include "feed/Types.hpp"
 #include "feed/impl/TrackableSignal.hpp"
 #include "feed/impl/Util.hpp"
+#include "util/async/AnyExecutionContext.hpp"
 #include "util/log/Logger.hpp"
-
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/post.hpp>
-#include <boost/asio/strand.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -35,8 +32,8 @@
 
 namespace feed::impl {
 
-SingleFeedBase::SingleFeedBase(boost::asio::io_context& ioContext, std::string const& name)
-    : strand_(boost::asio::make_strand(ioContext)), subCount_(getSubscriptionsGaugeInt(name)), name_(name)
+SingleFeedBase::SingleFeedBase(util::async::AnyExecutionContext& executionCtx, std::string const& name)
+    : strand_(executionCtx.makeStrand()), subCount_(getSubscriptionsGaugeInt(name)), name_(name)
 {
 }
 
@@ -50,9 +47,9 @@ SingleFeedBase::sub(SubscriberSharedPtr const& subscriber)
     });
 
     if (added) {
-        LOG(logger_.debug()) << subscriber->tag() << "Subscribed " << name_;
+        LOG(logger_.info()) << subscriber->tag() << "Subscribed " << name_;
         ++subCount_.get();
-        subscriber->onDisconnect.connect([this](SubscriberPtr connectionDisconnecting) {
+        subscriber->onDisconnect([this](SubscriberPtr connectionDisconnecting) {
             unsubInternal(connectionDisconnecting);
         });
     };
@@ -67,8 +64,8 @@ SingleFeedBase::unsub(SubscriberSharedPtr const& subscriber)
 void
 SingleFeedBase::pub(std::string msg) const
 {
-    boost::asio::post(strand_, [this, msg = std::move(msg)]() mutable {
-        auto const msgPtr = std::make_shared<std::string>(std::move(msg));
+    [[maybe_unused]] auto task = strand_.execute([this, msg = std::move(msg)]() {
+        auto const msgPtr = std::make_shared<std::string>(msg);
         signal_.emit(msgPtr);
     });
 }
@@ -83,7 +80,7 @@ void
 SingleFeedBase::unsubInternal(SubscriberPtr subscriber)
 {
     if (signal_.disconnect(subscriber)) {
-        LOG(logger_.debug()) << subscriber->tag() << "Unsubscribed " << name_;
+        LOG(logger_.info()) << subscriber->tag() << "Unsubscribed " << name_;
         --subCount_.get();
     }
 }

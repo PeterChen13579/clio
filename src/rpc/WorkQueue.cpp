@@ -19,12 +19,37 @@
 
 #include "rpc/WorkQueue.hpp"
 
+#include "util/log/Logger.hpp"
 #include "util/prometheus/Label.hpp"
 #include "util/prometheus/Prometheus.hpp"
 
+#include <boost/json/object.hpp>
+
+#include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <utility>
 
 namespace rpc {
+
+void
+WorkQueue::OneTimeCallable::setCallable(std::function<void()> func)
+{
+    func_ = func;
+}
+
+void
+WorkQueue::OneTimeCallable::operator()()
+{
+    if (not called_) {
+        func_();
+        called_ = true;
+    }
+}
+WorkQueue::OneTimeCallable::operator bool() const
+{
+    return func_.operator bool();
+}
 
 WorkQueue::WorkQueue(std::uint32_t numWorkers, uint32_t maxSize)
     : queued_{PrometheusService::counterInt(
@@ -54,9 +79,51 @@ WorkQueue::~WorkQueue()
 }
 
 void
+WorkQueue::stop(std::function<void()> onQueueEmpty)
+{
+    auto handler = onQueueEmpty_.lock();
+    handler->setCallable(std::move(onQueueEmpty));
+    stopping_ = true;
+    if (size() == 0) {
+        handler->operator()();
+    }
+}
+
+WorkQueue
+WorkQueue::make_WorkQueue(util::config::ClioConfigDefinition const& config)
+{
+    static util::Logger const log{"RPC"};
+    auto const serverConfig = config.getObject("server");
+    auto const numThreads = config.get<uint32_t>("workers");
+    auto const maxQueueSize = serverConfig.get<uint32_t>("max_queue_size");
+
+    LOG(log.info()) << "Number of workers = " << numThreads << ". Max queue size = " << maxQueueSize;
+    return WorkQueue{numThreads, maxQueueSize};
+}
+
+boost::json::object
+WorkQueue::report() const
+{
+    auto obj = boost::json::object{};
+
+    obj["queued"] = queued_.get().value();
+    obj["queued_duration_us"] = durationUs_.get().value();
+    obj["current_queue_size"] = curSize_.get().value();
+    obj["max_queue_size"] = maxSize_;
+
+    return obj;
+}
+
+void
 WorkQueue::join()
 {
     ioc_.join();
+}
+
+size_t
+WorkQueue::size() const
+{
+    return curSize_.get().value();
 }
 
 }  // namespace rpc

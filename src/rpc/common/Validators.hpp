@@ -21,14 +21,17 @@
 
 #include "rpc/Errors.hpp"
 #include "rpc/common/Types.hpp"
+#include "rpc/common/ValidationHelpers.hpp"
 
 #include <boost/json/array.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
 #include <fmt/core.h>
-#include <ripple/protocol/ErrorCodes.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/protocol/ErrorCodes.h>
 
-#include <cstdint>
+#include <concepts>
+#include <ctime>
 #include <functional>
 #include <initializer_list>
 #include <string>
@@ -37,45 +40,6 @@
 #include <vector>
 
 namespace rpc::validation {
-
-/**
- * @brief Check that the type is the same as what was expected.
- *
- * @tparam Expected The expected type that value should be convertible to
- * @param value The json value to check the type of
- * @return true if convertible; false otherwise
- */
-template <typename Expected>
-[[nodiscard]] bool static checkType(boost::json::value const& value)
-{
-    auto hasError = false;
-    if constexpr (std::is_same_v<Expected, bool>) {
-        if (not value.is_bool())
-            hasError = true;
-    } else if constexpr (std::is_same_v<Expected, std::string>) {
-        if (not value.is_string())
-            hasError = true;
-    } else if constexpr (std::is_same_v<Expected, double> or std::is_same_v<Expected, float>) {
-        if (not value.is_double())
-            hasError = true;
-    } else if constexpr (std::is_same_v<Expected, boost::json::array>) {
-        if (not value.is_array())
-            hasError = true;
-    } else if constexpr (std::is_same_v<Expected, boost::json::object>) {
-        if (not value.is_object())
-            hasError = true;
-    } else if constexpr (std::is_convertible_v<Expected, uint64_t> or std::is_convertible_v<Expected, int64_t>) {
-        if (not value.is_int64() && not value.is_uint64())
-            hasError = true;
-        // specify the type is unsigened, it can not be negative
-        if constexpr (std::is_unsigned_v<Expected>) {
-            if (value.is_int64() and value.as_int64() < 0)
-                hasError = true;
-        }
-    }
-
-    return not hasError;
-}
 
 /**
  * @brief A validator that simply requires a field to be present.
@@ -128,9 +92,9 @@ public:
     [[nodiscard]] MaybeError
     verify(boost::json::value const& value, std::string_view key) const
     {
-        if (value.is_object() and value.as_object().contains(key.data())) {
+        if (value.is_object() and value.as_object().contains(key)) {
             using boost::json::value_to;
-            auto const res = value_to<T>(value.as_object().at(key.data()));
+            auto const res = value_to<T>(value.as_object().at(key));
             if (value_ == res) {
                 return Error{Status{
                     RippledError::rpcNOT_SUPPORTED,
@@ -158,8 +122,8 @@ public:
     [[nodiscard]] static MaybeError
     verify(boost::json::value const& value, std::string_view key)
     {
-        if (value.is_object() and value.as_object().contains(key.data()))
-            return Error{Status{RippledError::rpcNOT_SUPPORTED, "Not supported field '" + std::string{key}}};
+        if (value.is_object() and value.as_object().contains(key))
+            return Error{Status{RippledError::rpcNOT_SUPPORTED, "Not supported field '" + std::string{key} + '\''}};
 
         return {};
     }
@@ -186,10 +150,10 @@ struct Type final {
     [[nodiscard]] MaybeError
     verify(boost::json::value const& value, std::string_view key) const
     {
-        if (not value.is_object() or not value.as_object().contains(key.data()))
-            return {};  // ignore. field does not exist, let 'required' fail instead
+        if (not value.is_object() or not value.as_object().contains(key))
+            return {};  // ignore. If field is supposed to exist, let 'required' fail instead
 
-        auto const& res = value.as_object().at(key.data());
+        auto const& res = value.as_object().at(key);
         auto const convertible = (checkType<Types>(res) || ...);
 
         if (not convertible)
@@ -230,10 +194,10 @@ public:
     {
         using boost::json::value_to;
 
-        if (not value.is_object() or not value.as_object().contains(key.data()))
+        if (not value.is_object() or not value.as_object().contains(key))
             return {};  // ignore. field does not exist, let 'required' fail instead
 
-        auto const res = value_to<Type>(value.as_object().at(key.data()));
+        auto const res = value_to<Type>(value.as_object().at(key));
 
         // TODO: may want a way to make this code more generic (e.g. use a free
         // function that can be overridden for this comparison)
@@ -273,10 +237,10 @@ public:
     {
         using boost::json::value_to;
 
-        if (not value.is_object() or not value.as_object().contains(key.data()))
+        if (not value.is_object() or not value.as_object().contains(key))
             return {};  // ignore. field does not exist, let 'required' fail instead
 
-        auto const res = value_to<Type>(value.as_object().at(key.data()));
+        auto const res = value_to<Type>(value.as_object().at(key));
 
         if (res < min_)
             return Error{Status{RippledError::rpcINVALID_PARAMS}};
@@ -314,16 +278,43 @@ public:
     {
         using boost::json::value_to;
 
-        if (not value.is_object() or not value.as_object().contains(key.data()))
+        if (not value.is_object() or not value.as_object().contains(key))
             return {};  // ignore. field does not exist, let 'required' fail instead
 
-        auto const res = value_to<Type>(value.as_object().at(key.data()));
+        auto const res = value_to<Type>(value.as_object().at(key));
 
         if (res > max_)
             return Error{Status{RippledError::rpcINVALID_PARAMS}};
 
         return {};
     }
+};
+
+/**
+ * @brief Validate that value can be converted to time according to the given format.
+ */
+class TimeFormatValidator final {
+    std::string format_;
+
+public:
+    /**
+     * @brief Construct the validator storing format value.
+     *
+     * @param format The format to use for time conversion
+     */
+    explicit TimeFormatValidator(std::string format) : format_{std::move(format)}
+    {
+    }
+
+    /**
+     * @brief Verify that the JSON value is valid formatted time.
+     *
+     * @param value The JSON value representing the outer object
+     * @param key The key used to retrieve the tested value from the outer object
+     * @return `RippledError::rpcINVALID_PARAMS` if validation failed; otherwise no error is returned
+     */
+    [[nodiscard]] MaybeError
+    verify(boost::json::value const& value, std::string_view key) const;
 };
 
 /**
@@ -355,10 +346,10 @@ public:
     {
         using boost::json::value_to;
 
-        if (not value.is_object() or not value.as_object().contains(key.data()))
+        if (not value.is_object() or not value.as_object().contains(key))
             return {};  // ignore. field does not exist, let 'required' fail instead
 
-        auto const res = value_to<Type>(value.as_object().at(key.data()));
+        auto const res = value_to<Type>(value.as_object().at(key));
         if (res != original_)
             return Error{Status{RippledError::rpcINVALID_PARAMS}};
 
@@ -410,10 +401,10 @@ public:
     {
         using boost::json::value_to;
 
-        if (not value.is_object() or not value.as_object().contains(key.data()))
+        if (not value.is_object() or not value.as_object().contains(key))
             return {};  // ignore. field does not exist, let 'required' fail instead
 
-        auto const res = value_to<Type>(value.as_object().at(key.data()));
+        auto const res = value_to<Type>(value.as_object().at(key));
         if (std::find(std::begin(options_), std::end(options_), res) == std::end(options_))
             return Error{Status{RippledError::rpcINVALID_PARAMS, fmt::format("Invalid field '{}'.", key)}};
 
@@ -440,6 +431,7 @@ public:
      * @param fn The callable/function object
      */
     template <typename Fn>
+        requires std::invocable<Fn, boost::json::value const&, std::string_view>
     explicit CustomValidator(Fn&& fn) : validator_{std::forward<Fn>(fn)}
     {
     }
@@ -464,71 +456,152 @@ public:
 [[nodiscard]] bool
 checkIsU32Numeric(std::string_view sv);
 
-/**
- * @brief Provides a commonly used validator for ledger index.
- *
- * LedgerIndex must be a string or an int. If the specified LedgerIndex is a string, its value must be either
- * "validated" or a valid integer value represented as a string.
- */
-extern CustomValidator LedgerIndexValidator;
+template <class HexType>
+    requires(std::is_same_v<HexType, ripple::uint160> || std::is_same_v<HexType, ripple::uint192> || std::is_same_v<HexType, ripple::uint256>)
+MaybeError
+makeHexStringValidator(boost::json::value const& value, std::string_view key)
+{
+    if (!value.is_string())
+        return Error{Status{RippledError::rpcINVALID_PARAMS, std::string(key) + "NotString"}};
+
+    HexType parsedInt;
+    if (!parsedInt.parseHex(value.as_string().c_str()))
+        return Error{Status{RippledError::rpcINVALID_PARAMS, std::string(key) + "Malformed"}};
+
+    return MaybeError{};
+}
 
 /**
- * @brief Provides a commonly used validator for accounts.
- *
- * Account must be a string and the converted public key is valid.
+ * @brief A group of custom validation functions
  */
-extern CustomValidator AccountValidator;
+struct CustomValidators final {
+    /**
+     * @brief Provides a commonly used validator for ledger index.
+     *
+     * LedgerIndex must be a string or an int. If the specified LedgerIndex is a string, its value must be either
+     * "validated" or a valid integer value represented as a string.
+     */
+    static CustomValidator LedgerIndexValidator;
+
+    /**
+     * @brief Provides a commonly used validator for accounts.
+     *
+     * Account must be a string and the converted public key is valid.
+     */
+    static CustomValidator AccountValidator;
+
+    /**
+     * @brief Provides a commonly used validator for accounts.
+     *
+     * Account must be a string and can convert to base58.
+     */
+    static CustomValidator AccountBase58Validator;
+
+    /**
+     * @brief Provides a commonly used validator for markers.
+     *
+     * A marker is composed of a comma-separated index and a start hint.
+     * The former will be read as hex, and the latter can be cast to uint64.
+     */
+    static CustomValidator AccountMarkerValidator;
+
+    /**
+     * @brief Provides a commonly used validator for uint160(AccountID) hex string.
+     *
+     * It must be a string and also a decodable hex.
+     * AccountID uses this validator.
+     */
+    static CustomValidator Uint160HexStringValidator;
+
+    /**
+     * @brief Provides a commonly used validator for uint192 hex string.
+     *
+     * It must be a string and also a decodable hex.
+     * MPTIssuanceID uses this validator.
+     */
+    static CustomValidator Uint192HexStringValidator;
+
+    /**
+     * @brief Provides a commonly used validator for uint256 hex string.
+     *
+     * It must be a string and also a decodable hex.
+     * Transaction index, ledger hash all use this validator.
+     */
+    static CustomValidator Uint256HexStringValidator;
+
+    /**
+     * @brief Provides a commonly used validator for currency, including standard currency code and token code.
+     */
+    static CustomValidator CurrencyValidator;
+
+    /**
+     * @brief Provides a commonly used validator for issuer type.
+     *
+     * It must be a hex string or base58 string.
+     */
+    static CustomValidator IssuerValidator;
+
+    /**
+     * @brief Provides a validator for validating streams used in subscribe/unsubscribe.
+     */
+    static CustomValidator SubscribeStreamValidator;
+
+    /**
+     * @brief Provides a validator for validating accounts used in subscribe/unsubscribe.
+     */
+    static CustomValidator SubscribeAccountsValidator;
+
+    /**
+     * @brief Validates an asset (ripple::Issue).
+     *
+     * Used by amm_info.
+     */
+    static CustomValidator CurrencyIssueValidator;
+
+    /**
+     * @brief Provides a validator for validating authorized_credentials json array.
+     *
+     * Used by deposit_preauth.
+     */
+    static CustomValidator AuthorizeCredentialValidator;
+
+    /**
+     * @brief Provides a validator for validating credential_type.
+     *
+     * Used by AuthorizeCredentialValidator in deposit_preauth.
+     */
+    static CustomValidator CredentialTypeValidator;
+};
 
 /**
- * @brief Provides a commonly used validator for accounts.
- *
- * Account must be a string and can convert to base58.
+ * @brief Validates that the elements of the array is of type Hex256 uint
  */
-extern CustomValidator AccountBase58Validator;
+struct Hex256ItemType final {
+    /**
+     * @brief Validates given the prerequisite that the type of the json value is an array,
+     * verifies all values within the array is of uint256 hash
+     *
+     * @param value the value to verify
+     * @param key The key used to retrieve the tested value from the outer object
+     * @return `RippledError::rpcINVALID_PARAMS` if validation failed; otherwise no error is returned
+     */
+    [[nodiscard]] static MaybeError
+    verify(boost::json::value const& value, std::string_view key)
+    {
+        if (not value.is_object() or not value.as_object().contains(key))
+            return {};  // ignore. If field is supposed to exist, let 'required' fail instead
 
-/**
- * @brief Provides a commonly used validator for markers.
- *
- * A marker is composed of a comma-separated index and a start hint.
- * The former will be read as hex, and the latter can be cast to uint64.
- */
-extern CustomValidator AccountMarkerValidator;
+        auto const& res = value.as_object().at(key);
 
-/**
- * @brief Provides a commonly used validator for uint256 hex string.
- *
- * It must be a string and also a decodable hex.
- * Transaction index, ledger hash all use this validator.
- */
-extern CustomValidator Uint256HexStringValidator;
-
-/**
- * @brief Provides a commonly used validator for currency, including standard currency code and token code.
- */
-extern CustomValidator CurrencyValidator;
-
-/**
- * @brief Provides a commonly used validator for issuer type.
- *
- * It must be a hex string or base58 string.
- */
-extern CustomValidator IssuerValidator;
-
-/**
- * @brief Provides a validator for validating streams used in subscribe/unsubscribe.
- */
-extern CustomValidator SubscribeStreamValidator;
-
-/**
- * @brief Provides a validator for validating accounts used in subscribe/unsubscribe.
- */
-extern CustomValidator SubscribeAccountsValidator;
-
-/**
- * @brief Validates an asset (ripple::Issue).
- *
- * Used by amm_info.
- */
-extern CustomValidator CurrencyIssueValidator;
+        // loop through each item in the array and make sure it is uint256 hex string
+        for (auto const& elem : res.as_array()) {
+            ripple::uint256 num;
+            if (!elem.is_string() || !num.parseHex(elem.as_string())) {
+                return Error{Status{RippledError::rpcINVALID_PARAMS, "Item is not a valid uint256 type."}};
+            }
+        }
+        return {};
+    }
+};
 
 }  // namespace rpc::validation

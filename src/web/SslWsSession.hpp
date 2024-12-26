@@ -20,7 +20,7 @@
 #pragma once
 
 #include "util/Taggable.hpp"
-#include "web/DOSGuard.hpp"
+#include "web/dosguard/DOSGuardInterface.hpp"
 #include "web/impl/WsBase.hpp"
 #include "web/interface/ConnectionBase.hpp"
 
@@ -36,6 +36,7 @@
 #include <boost/optional/optional.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -64,17 +65,26 @@ public:
      * @param handler The server handler to use
      * @param buffer Buffer with initial data received from the peer
      * @param isAdmin Whether the connection has admin privileges
+     * @param maxWsSendingQueueSize The maximum size of the sending queue for websocket
      */
     explicit SslWsSession(
         boost::beast::ssl_stream<boost::beast::tcp_stream>&& stream,
         std::string ip,
         std::reference_wrapper<util::TagDecoratorFactory const> tagFactory,
-        std::reference_wrapper<web::DOSGuard> dosGuard,
+        std::reference_wrapper<dosguard::DOSGuardInterface> dosGuard,
         std::shared_ptr<HandlerType> const& handler,
         boost::beast::flat_buffer&& buffer,
-        bool isAdmin
+        bool isAdmin,
+        std::uint32_t maxWsSendingQueueSize
     )
-        : impl::WsBase<SslWsSession, HandlerType>(ip, tagFactory, dosGuard, handler, std::move(buffer))
+        : impl::WsBase<SslWsSession, HandlerType>(
+              ip,
+              tagFactory,
+              dosGuard,
+              handler,
+              std::move(buffer),
+              maxWsSendingQueueSize
+          )
         , ws_(std::move(stream))
     {
         ConnectionBase::isAdmin_ = isAdmin;  // NOLINT(cppcoreguidelines-prefer-member-initializer)
@@ -102,10 +112,11 @@ class SslWsUpgrader : public std::enable_shared_from_this<SslWsUpgrader<HandlerT
     boost::beast::flat_buffer buffer_;
     std::string ip_;
     std::reference_wrapper<util::TagDecoratorFactory const> tagFactory_;
-    std::reference_wrapper<web::DOSGuard> dosGuard_;
+    std::reference_wrapper<dosguard::DOSGuardInterface> dosGuard_;
     std::shared_ptr<HandlerType> const handler_;
     http::request<http::string_body> req_;
     bool isAdmin_;
+    std::uint32_t maxWsSendingQueueSize_;
 
 public:
     /**
@@ -119,16 +130,18 @@ public:
      * @param buffer Buffer with initial data received from the peer. Ownership is transferred
      * @param request The request. Ownership is transferred
      * @param isAdmin Whether the connection has admin privileges
+     * @param maxWsSendingQueueSize The maximum size of the sending queue for websocket
      */
     SslWsUpgrader(
         boost::beast::ssl_stream<boost::beast::tcp_stream> stream,
         std::string ip,
         std::reference_wrapper<util::TagDecoratorFactory const> tagFactory,
-        std::reference_wrapper<web::DOSGuard> dosGuard,
+        std::reference_wrapper<dosguard::DOSGuardInterface> dosGuard,
         std::shared_ptr<HandlerType> handler,
         boost::beast::flat_buffer&& buffer,
         http::request<http::string_body> request,
-        bool isAdmin
+        bool isAdmin,
+        std::uint32_t maxWsSendingQueueSize
     )
         : https_(std::move(stream))
         , buffer_(std::move(buffer))
@@ -138,6 +151,7 @@ public:
         , handler_(std::move(handler))
         , req_(std::move(request))
         , isAdmin_(isAdmin)
+        , maxWsSendingQueueSize_(maxWsSendingQueueSize)
     {
     }
 
@@ -179,7 +193,14 @@ private:
         boost::beast::get_lowest_layer(https_).expires_never();
 
         std::make_shared<SslWsSession<HandlerType>>(
-            std::move(https_), ip_, tagFactory_, dosGuard_, handler_, std::move(buffer_), isAdmin_
+            std::move(https_),
+            ip_,
+            tagFactory_,
+            dosGuard_,
+            handler_,
+            std::move(buffer_),
+            isAdmin_,
+            maxWsSendingQueueSize_
         )
             ->run(std::move(req_));
     }

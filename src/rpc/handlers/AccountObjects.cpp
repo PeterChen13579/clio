@@ -23,19 +23,19 @@
 #include "rpc/JS.hpp"
 #include "rpc/RPCHelpers.hpp"
 #include "rpc/common/Types.hpp"
+#include "util/Assert.hpp"
 #include "util/LedgerUtils.hpp"
 
 #include <boost/json/array.hpp>
 #include <boost/json/conversion.hpp>
 #include <boost/json/value.hpp>
 #include <boost/json/value_to.hpp>
-#include <ripple/basics/strHex.h>
-#include <ripple/protocol/ErrorCodes.h>
-#include <ripple/protocol/Indexes.h>
-#include <ripple/protocol/LedgerFormats.h>
-#include <ripple/protocol/LedgerHeader.h>
-#include <ripple/protocol/STLedgerEntry.h>
-#include <ripple/protocol/jss.h>
+#include <xrpl/basics/strHex.h>
+#include <xrpl/protocol/Indexes.h>
+#include <xrpl/protocol/LedgerFormats.h>
+#include <xrpl/protocol/LedgerHeader.h>
+#include <xrpl/protocol/STLedgerEntry.h>
+#include <xrpl/protocol/jss.h>
 
 #include <algorithm>
 #include <iterator>
@@ -53,7 +53,8 @@ AccountObjectsHandler::Result
 AccountObjectsHandler::process(AccountObjectsHandler::Input input, Context const& ctx) const
 {
     auto const range = sharedPtrBackend_->fetchLedgerRange();
-    auto const lgrInfoOrStatus = getLedgerInfoFromHashOrSeq(
+    ASSERT(range.has_value(), "AccountObject's ledger range must be available");
+    auto const lgrInfoOrStatus = getLedgerHeaderFromHashOrSeq(
         *sharedPtrBackend_, ctx.yield, input.ledgerHash, input.ledgerIndex, range->maxSequence
     );
 
@@ -72,7 +73,7 @@ AccountObjectsHandler::process(AccountObjectsHandler::Input input, Context const
 
     if (input.deletionBlockersOnly) {
         typeFilter.emplace();
-        auto const& deletionBlockers = util::getDeletionBlockerLedgerTypes();
+        auto const& deletionBlockers = util::LedgerTypes::GetDeletionBlockerLedgerTypes();
         typeFilter->reserve(deletionBlockers.size());
 
         for (auto type : deletionBlockers) {
@@ -120,9 +121,9 @@ void
 tag_invoke(boost::json::value_from_tag, boost::json::value& jv, AccountObjectsHandler::Output const& output)
 {
     auto objects = boost::json::array{};
-    std::transform(
-        std::cbegin(output.accountObjects),
-        std::cend(output.accountObjects),
+    std::ranges::transform(
+        output.accountObjects,
+
         std::back_inserter(objects),
         [](auto const& sle) { return toJson(sle); }
     );
@@ -160,7 +161,7 @@ tag_invoke(boost::json::value_to_tag<AccountObjectsHandler::Input>, boost::json:
     }
 
     if (jsonObject.contains(JS(type)))
-        input.type = util::getLedgerEntryTypeFromStr(boost::json::value_to<std::string>(jv.at(JS(type))));
+        input.type = util::LedgerTypes::GetLedgerEntryTypeFromStr(boost::json::value_to<std::string>(jv.at(JS(type))));
 
     if (jsonObject.contains(JS(limit)))
         input.limit = jv.at(JS(limit)).as_int64();

@@ -20,10 +20,11 @@
 #include "rpc/Errors.hpp"
 
 #include "rpc/JS.hpp"
+#include "util/OverloadSet.hpp"
 
 #include <boost/json/object.hpp>
-#include <ripple/protocol/ErrorCodes.h>
-#include <ripple/protocol/jss.h>
+#include <xrpl/protocol/ErrorCodes.h>
+#include <xrpl/protocol/jss.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -35,17 +36,6 @@
 #include <variant>
 
 using namespace std;
-
-namespace {
-template <typename... Ts>
-struct overloadSet : Ts... {
-    using Ts::operator()...;
-};
-
-// explicit deduction guide (not needed as of C++20, but clang be clang)
-template <typename... Ts>
-overloadSet(Ts...) -> overloadSet<Ts...>;
-}  // namespace
 
 namespace rpc {
 
@@ -59,10 +49,13 @@ getWarningInfo(WarningCode code)
          "'ledger_index':'current' in your request"},
         {warnRPC_OUTDATED, "This server may be out of date"},
         {warnRPC_RATE_LIMIT, "You are about to be rate limited"},
+        {warnRPC_DEPRECATED,
+         "Some fields from your request are deprecated. Please check the documentation at "
+         "https://xrpl.org/docs/references/http-websocket-apis/ and update your request."}
     };
 
     auto matchByCode = [code](auto const& info) { return info.code == code; };
-    if (auto it = find_if(begin(infos), end(infos), matchByCode); it != end(infos))
+    if (auto it = std::ranges::find_if(infos, matchByCode); it != end(infos))
         return *it;
 
     throw(out_of_range("Invalid WarningCode"));
@@ -73,10 +66,8 @@ makeWarning(WarningCode code)
 {
     auto json = boost::json::object{};
     auto const& info = getWarningInfo(code);
-
     json["id"] = code;
-    json["message"] = static_cast<string>(info.message);
-
+    json["message"] = info.message;
     return json;
 }
 
@@ -84,24 +75,43 @@ ClioErrorInfo const&
 getErrorInfo(ClioError code)
 {
     constexpr static ClioErrorInfo infos[]{
-        {ClioError::rpcMALFORMED_CURRENCY, "malformedCurrency", "Malformed currency."},
-        {ClioError::rpcMALFORMED_REQUEST, "malformedRequest", "Malformed request."},
-        {ClioError::rpcMALFORMED_OWNER, "malformedOwner", "Malformed owner."},
-        {ClioError::rpcMALFORMED_ADDRESS, "malformedAddress", "Malformed address."},
-        {ClioError::rpcINVALID_HOT_WALLET, "invalidHotWallet", "Invalid hot wallet."},
-        {ClioError::rpcUNKNOWN_OPTION, "unknownOption", "Unknown option."},
-        {ClioError::rpcFIELD_NOT_FOUND_TRANSACTION, "fieldNotFoundTransaction", "Missing field."},
-        {ClioError::rpcMALFORMED_ORACLE_DOCUMENT_ID, "malformedDocumentID", "Malformed oracle_document_id."},
+        {.code = ClioError::rpcMALFORMED_CURRENCY, .error = "malformedCurrency", .message = "Malformed currency."},
+        {.code = ClioError::rpcMALFORMED_REQUEST, .error = "malformedRequest", .message = "Malformed request."},
+        {.code = ClioError::rpcMALFORMED_OWNER, .error = "malformedOwner", .message = "Malformed owner."},
+        {.code = ClioError::rpcMALFORMED_ADDRESS, .error = "malformedAddress", .message = "Malformed address."},
+        {.code = ClioError::rpcINVALID_HOT_WALLET, .error = "invalidHotWallet", .message = "Invalid hot wallet."},
+        {.code = ClioError::rpcUNKNOWN_OPTION, .error = "unknownOption", .message = "Unknown option."},
+        {.code = ClioError::rpcFIELD_NOT_FOUND_TRANSACTION,
+         .error = "fieldNotFoundTransaction",
+         .message = "Missing field."},
+        {.code = ClioError::rpcMALFORMED_ORACLE_DOCUMENT_ID,
+         .error = "malformedDocumentID",
+         .message = "Malformed oracle_document_id."},
+        {.code = ClioError::rpcMALFORMED_AUTHORIZED_CREDENTIALS,
+         .error = "malformedAuthorizedCredentials",
+         .message = "Malformed authorized credentials."},
         // special system errors
-        {ClioError::rpcINVALID_API_VERSION, JS(invalid_API_version), "Invalid API version."},
-        {ClioError::rpcCOMMAND_IS_MISSING, JS(missingCommand), "Method is not specified or is not a string."},
-        {ClioError::rpcCOMMAND_NOT_STRING, "commandNotString", "Method is not a string."},
-        {ClioError::rpcCOMMAND_IS_EMPTY, "emptyCommand", "Method is an empty string."},
-        {ClioError::rpcPARAMS_UNPARSEABLE, "paramsUnparseable", "Params must be an array holding exactly one object."},
+        {.code = ClioError::rpcINVALID_API_VERSION, .error = JS(invalid_API_version), .message = "Invalid API version."
+        },
+        {.code = ClioError::rpcCOMMAND_IS_MISSING,
+         .error = JS(missingCommand),
+         .message = "Method is not specified or is not a string."},
+        {.code = ClioError::rpcCOMMAND_NOT_STRING, .error = "commandNotString", .message = "Method is not a string."},
+        {.code = ClioError::rpcCOMMAND_IS_EMPTY, .error = "emptyCommand", .message = "Method is an empty string."},
+        {.code = ClioError::rpcPARAMS_UNPARSEABLE,
+         .error = "paramsUnparseable",
+         .message = "Params must be an array holding exactly one object."},
+        // etl related errors
+        {.code = ClioError::etlCONNECTION_ERROR, .error = "connectionError", .message = "Couldn't connect to rippled."},
+        {.code = ClioError::etlREQUEST_ERROR, .error = "requestError", .message = "Error sending request to rippled."},
+        {.code = ClioError::etlREQUEST_TIMEOUT, .error = "timeout", .message = "Request to rippled timed out."},
+        {.code = ClioError::etlINVALID_RESPONSE,
+         .error = "invalidResponse",
+         .message = "Rippled returned an invalid response."}
     };
 
     auto matchByCode = [code](auto const& info) { return info.code == code; };
-    if (auto it = find_if(begin(infos), end(infos), matchByCode); it != end(infos))
+    if (auto it = std::ranges::find_if(infos, matchByCode); it != end(infos))
         return *it;
 
     throw(out_of_range("Invalid error code"));
@@ -128,9 +138,9 @@ makeError(ClioError err, std::optional<std::string_view> customError, std::optio
     boost::json::object json;
     auto const& info = getErrorInfo(err);
 
-    json["error"] = customError.value_or(info.error).data();
+    json["error"] = customError.value_or(info.error);
     json["error_code"] = static_cast<uint32_t>(info.code);
-    json["error_message"] = customMessage.value_or(info.message).data();
+    json["error_message"] = customMessage.value_or(info.message);
     json["status"] = "error";
     json["type"] = "response";
 
@@ -143,7 +153,7 @@ makeError(Status const& status)
     auto wrapOptional = [](string_view const& str) { return str.empty() ? nullopt : make_optional(str); };
 
     auto res = visit(
-        overloadSet{
+        util::OverloadSet{
             [&status, &wrapOptional](RippledError err) {
                 if (err == ripple::rpcUNKNOWN)
                     return boost::json::object{{"error", status.message}, {"type", "response"}, {"status", "error"}};

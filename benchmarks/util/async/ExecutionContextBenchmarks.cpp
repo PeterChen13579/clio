@@ -31,7 +31,6 @@
 #include <cstdint>
 #include <latch>
 #include <optional>
-#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -209,7 +208,7 @@ benchmarkThreads(benchmark::State& state)
 }
 
 template <typename CtxType>
-void
+static void
 benchmarkExecutionContextBatched(benchmark::State& state)
 {
     auto data = generateData();
@@ -220,7 +219,7 @@ benchmarkExecutionContextBatched(benchmark::State& state)
 }
 
 template <typename CtxType>
-void
+static void
 benchmarkAnyExecutionContextBatched(benchmark::State& state)
 {
     auto data = generateData();

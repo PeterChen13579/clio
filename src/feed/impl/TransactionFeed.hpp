@@ -25,15 +25,17 @@
 #include "feed/impl/TrackableSignal.hpp"
 #include "feed/impl/TrackableSignalMap.hpp"
 #include "feed/impl/Util.hpp"
+#include "util/async/AnyExecutionContext.hpp"
+#include "util/async/AnyStrand.hpp"
 #include "util/log/Logger.hpp"
 #include "util/prometheus/Gauge.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/strand.hpp>
 #include <fmt/core.h>
-#include <ripple/protocol/AccountID.h>
-#include <ripple/protocol/Book.h>
-#include <ripple/protocol/LedgerHeader.h>
+#include <xrpl/protocol/AccountID.h>
+#include <xrpl/protocol/Book.h>
+#include <xrpl/protocol/LedgerHeader.h>
 
 #include <array>
 #include <cstdint>
@@ -50,10 +52,10 @@ class TransactionFeed {
 
     struct TransactionSlot {
         std::reference_wrapper<TransactionFeed> feed;
-        std::weak_ptr<Subscriber> connectionWeakPtr;
+        std::weak_ptr<Subscriber> subscriptionContextWeakPtr;
 
         TransactionSlot(TransactionFeed& feed, SubscriberSharedPtr const& connection)
-            : feed(feed), connectionWeakPtr(connection)
+            : feed(feed), subscriptionContextWeakPtr(connection)
         {
         }
 
@@ -63,7 +65,7 @@ class TransactionFeed {
 
     util::Logger logger_{"Subscriptions"};
 
-    boost::asio::strand<boost::asio::io_context::executor_type> strand_;
+    util::async::AnyStrand strand_;
     std::reference_wrapper<util::prometheus::GaugeInt> subAllCount_;
     std::reference_wrapper<util::prometheus::GaugeInt> subAccountCount_;
     std::reference_wrapper<util::prometheus::GaugeInt> subBookCount_;
@@ -72,16 +74,20 @@ class TransactionFeed {
     TrackableSignalMap<ripple::Book, Subscriber, AllVersionTransactionsType const&> bookSignal_;
     TrackableSignal<Subscriber, AllVersionTransactionsType const&> signal_;
 
+    // Signals for proposed tx subscribers
+    TrackableSignalMap<ripple::AccountID, Subscriber, AllVersionTransactionsType const&> accountProposedSignal_;
+    TrackableSignal<Subscriber, AllVersionTransactionsType const&> txProposedSignal_;
+
     std::unordered_set<SubscriberPtr>
         notified_;  // Used by slots to prevent double notifications if tx contains multiple subscribed accounts
 
 public:
     /**
      * @brief Construct a new Transaction Feed object.
-     * @param ioContext The actual publish will be called in the strand of this.
+     * @param executionCtx The actual publish will be called in the strand of this.
      */
-    TransactionFeed(boost::asio::io_context& ioContext)
-        : strand_(boost::asio::make_strand(ioContext))
+    TransactionFeed(util::async::AnyExecutionContext& executionCtx)
+        : strand_(executionCtx.makeStrand())
         , subAllCount_(getSubscriptionsGaugeInt("tx"))
         , subAccountCount_(getSubscriptionsGaugeInt("account"))
         , subBookCount_(getSubscriptionsGaugeInt("book"))
@@ -91,28 +97,41 @@ public:
     /**
      * @brief Subscribe to the transaction feed.
      * @param subscriber
-     * @param apiVersion The api version of feed.
      */
     void
-    sub(SubscriberSharedPtr const& subscriber, std::uint32_t apiVersion);
+    sub(SubscriberSharedPtr const& subscriber);
 
     /**
      * @brief Subscribe to the transaction feed, only receive the feed when particular account is affected.
      * @param subscriber
      * @param account The account to watch.
-     * @param apiVersion The api version of feed.
      */
     void
-    sub(ripple::AccountID const& account, SubscriberSharedPtr const& subscriber, std::uint32_t apiVersion);
+    sub(ripple::AccountID const& account, SubscriberSharedPtr const& subscriber);
 
     /**
      * @brief Subscribe to the transaction feed, only receive the feed when particular order book is affected.
      * @param subscriber
      * @param book The order book to watch.
-     * @param apiVersion The api version of feed.
      */
     void
-    sub(ripple::Book const& book, SubscriberSharedPtr const& subscriber, std::uint32_t apiVersion);
+    sub(ripple::Book const& book, SubscriberSharedPtr const& subscriber);
+
+    /**
+     * @brief Subscribe to the transaction feed for proposed transaction stream.
+     * @param subscriber
+     */
+    void
+    subProposed(SubscriberSharedPtr const& subscriber);
+
+    /**
+     * @brief Subscribe to the transaction feed for proposed account, only receive the feed when particular account is
+     * affected.
+     * @param subscriber
+     * @param account The account to watch.
+     */
+    void
+    subProposed(ripple::AccountID const& account, SubscriberSharedPtr const& subscriber);
 
     /**
      * @brief Unsubscribe to the transaction feed.
@@ -128,6 +147,21 @@ public:
      */
     void
     unsub(ripple::AccountID const& account, SubscriberSharedPtr const& subscriber);
+
+    /**
+     * @brief Unsubscribe to the transaction feed for proposed transaction stream.
+     * @param subscriber
+     */
+    void
+    unsubProposed(SubscriberSharedPtr const& subscriber);
+
+    /**
+     * @brief Unsubscribe to the transaction for particular proposed account.
+     * @param subscriber
+     * @param account The account to unsubscribe.
+     */
+    void
+    unsubProposed(ripple::AccountID const& account, SubscriberSharedPtr const& subscriber);
 
     /**
      * @brief Unsubscribe to the transaction feed for particular order book.
@@ -172,6 +206,12 @@ private:
 
     void
     unsubInternal(ripple::AccountID const& account, SubscriberPtr subscriber);
+
+    void
+    unsubProposedInternal(SubscriberPtr subscriber);
+
+    void
+    unsubProposedInternal(ripple::AccountID const& account, SubscriberPtr subscriber);
 
     void
     unsubInternal(ripple::Book const& book, SubscriberPtr subscriber);

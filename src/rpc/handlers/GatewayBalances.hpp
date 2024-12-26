@@ -25,17 +25,18 @@
 #include "rpc/common/Specs.hpp"
 #include "rpc/common/Types.hpp"
 #include "rpc/common/Validators.hpp"
+#include "util/AccountUtils.hpp"
 
 #include <boost/json/array.hpp>
 #include <boost/json/conversion.hpp>
 #include <boost/json/value.hpp>
-#include <ripple/protocol/AccountID.h>
-#include <ripple/protocol/ErrorCodes.h>
-#include <ripple/protocol/PublicKey.h>
-#include <ripple/protocol/STAmount.h>
-#include <ripple/protocol/UintTypes.h>
-#include <ripple/protocol/jss.h>
-#include <ripple/protocol/tokens.h>
+#include <xrpl/protocol/AccountID.h>
+#include <xrpl/protocol/ErrorCodes.h>
+#include <xrpl/protocol/PublicKey.h>
+#include <xrpl/protocol/STAmount.h>
+#include <xrpl/protocol/UintTypes.h>
+#include <xrpl/protocol/jss.h>
+#include <xrpl/protocol/tokens.h>
 
 #include <cstdint>
 #include <map>
@@ -116,14 +117,14 @@ public:
                 auto const wallets = value.is_array() ? value.as_array() : boost::json::array{value};
                 auto const getAccountID = [](auto const& j) -> std::optional<ripple::AccountID> {
                     if (j.is_string()) {
-                        auto const pk = ripple::parseBase58<ripple::PublicKey>(
+                        auto const pk = util::parseBase58Wrapper<ripple::PublicKey>(
                             ripple::TokenType::AccountPublic, boost::json::value_to<std::string>(j)
                         );
 
                         if (pk)
                             return ripple::calcAccountID(*pk);
 
-                        return ripple::parseBase58<ripple::AccountID>(boost::json::value_to<std::string>(j));
+                        return util::parseBase58Wrapper<ripple::AccountID>(boost::json::value_to<std::string>(j));
                     }
 
                     return {};
@@ -138,9 +139,9 @@ public:
             }};
 
         static auto const rpcSpec = RpcSpec{
-            {JS(account), validation::Required{}, validation::AccountValidator},
-            {JS(ledger_hash), validation::Uint256HexStringValidator},
-            {JS(ledger_index), validation::LedgerIndexValidator},
+            {JS(account), validation::Required{}, validation::CustomValidators::AccountValidator},
+            {JS(ledger_hash), validation::CustomValidators::Uint256HexStringValidator},
+            {JS(ledger_index), validation::CustomValidators::LedgerIndexValidator},
             {JS(hotwallet), hotWalletValidator}
         };
 

@@ -44,6 +44,7 @@
 #include <boost/log/utility/setup/file.hpp>
 #include <boost/log/utility/setup/formatter_parser.hpp>
 
+#include <array>
 #include <cstddef>
 #include <optional>
 #include <ostream>
@@ -51,7 +52,9 @@
 
 namespace util {
 
-class Config;
+namespace config {
+class ClioConfigDefinition;
+}  // namespace config
 
 /**
  * @brief Skips evaluation of expensive argument lists if the given logger is disabled for the required severity level.
@@ -163,19 +166,20 @@ class Logger final {
     private:
         [[nodiscard]] static std::string
         pretty_path(SourceLocationType const& loc, size_t max_depth = 3);
-
-        /**
-         * @brief Custom JSON parser for @ref Severity.
-         *
-         * @param value The JSON string to parse
-         * @return The parsed severity
-         * @throws std::runtime_error Thrown if severity is not in the right format
-         */
-        friend Severity
-        tag_invoke(boost::json::value_to_tag<Severity>, boost::json::value const& value);
     };
 
 public:
+    static constexpr std::array<char const*, 8> CHANNELS = {
+        "General",
+        "WebServer",
+        "Backend",
+        "RPC",
+        "ETL",
+        "Subscriptions",
+        "Performance",
+        "Migration",
+    };
+
     /**
      * @brief Construct a new Logger object that produces loglines for the
      * specified channel.
@@ -274,7 +278,7 @@ public:
      * @param config The configuration to use
      */
     static void
-    init(Config const& config);
+    init(config::ClioConfigDefinition const& config);
 
     /**
      * @brief Globally accesible General logger at Severity::TRC severity

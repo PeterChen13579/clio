@@ -23,7 +23,9 @@
 #include "rpc/common/Types.hpp"
 #include "util/Taggable.hpp"
 #include "util/log/Logger.hpp"
-#include "web/DOSGuard.hpp"
+#include "web/SubscriptionContext.hpp"
+#include "web/SubscriptionContextInterface.hpp"
+#include "web/dosguard/DOSGuardInterface.hpp"
 #include "web/interface/Concepts.hpp"
 #include "web/interface/ConnectionBase.hpp"
 
@@ -38,15 +40,17 @@
 #include <boost/beast/http/status.hpp>
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/version.hpp>
+#include <boost/beast/websocket/error.hpp>
 #include <boost/beast/websocket/rfc6455.hpp>
 #include <boost/beast/websocket/stream_base.hpp>
 #include <boost/core/ignore_unused.hpp>
 #include <boost/json/array.hpp>
 #include <boost/json/parse.hpp>
 #include <boost/json/serialize.hpp>
-#include <ripple/protocol/ErrorCodes.h>
+#include <xrpl/protocol/ErrorCodes.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -72,10 +76,13 @@ class WsBase : public ConnectionBase, public std::enable_shared_from_this<WsBase
     using std::enable_shared_from_this<WsBase<Derived, HandlerType>>::shared_from_this;
 
     boost::beast::flat_buffer buffer_;
-    std::reference_wrapper<web::DOSGuard> dosGuard_;
+    std::reference_wrapper<dosguard::DOSGuardInterface> dosGuard_;
     bool sending_ = false;
     std::queue<std::shared_ptr<std::string>> messages_;
     std::shared_ptr<HandlerType> const handler_;
+
+    SubscriptionContextPtr subscriptionContext_;
+    std::uint32_t maxSendingQueueSize_;
 
 protected:
     util::Logger log_{"WebServer"};
@@ -84,7 +91,10 @@ protected:
     void
     wsFail(boost::beast::error_code ec, char const* what)
     {
-        LOG(perfLog_.error()) << tag() << ": " << what << ": " << ec.message();
+        // Don't log if the WebSocket stream was gracefully closed at both endpoints
+        if (ec != boost::beast::websocket::error::closed)
+            LOG(log_.error()) << tag() << ": " << what << ": " << ec.message() << ": " << ec.value();
+
         if (!ec_ && ec != boost::asio::error::operation_aborted) {
             ec_ = ec;
             boost::beast::get_lowest_layer(derived().ws()).socket().close(ec);
@@ -95,13 +105,19 @@ public:
     explicit WsBase(
         std::string ip,
         std::reference_wrapper<util::TagDecoratorFactory const> tagFactory,
-        std::reference_wrapper<web::DOSGuard> dosGuard,
+        std::reference_wrapper<dosguard::DOSGuardInterface> dosGuard,
         std::shared_ptr<HandlerType> const& handler,
-        boost::beast::flat_buffer&& buffer
+        boost::beast::flat_buffer&& buffer,
+        std::uint32_t maxSendingQueueSize
     )
-        : ConnectionBase(tagFactory, ip), buffer_(std::move(buffer)), dosGuard_(dosGuard), handler_(handler)
+        : ConnectionBase(tagFactory, ip)
+        , buffer_(std::move(buffer))
+        , dosGuard_(dosGuard)
+        , handler_(handler)
+        , maxSendingQueueSize_(maxSendingQueueSize)
     {
         upgraded = true;  // NOLINT (cppcoreguidelines-pro-type-member-init)
+
         LOG(perfLog_.debug()) << tag() << "session created";
     }
 
@@ -160,10 +176,30 @@ public:
         boost::asio::dispatch(
             derived().ws().get_executor(),
             [this, self = derived().shared_from_this(), msg = std::move(msg)]() {
+                if (messages_.size() > maxSendingQueueSize_) {
+                    wsFail(boost::asio::error::timed_out, "Client is too slow");
+                    return;
+                }
+
                 messages_.push(msg);
                 maybeSendNext();
             }
         );
+    }
+
+    /**
+     * @brief Get the subscription context for this connection.
+     *
+     * @param factory Tag TagDecoratorFactory to use to create the context.
+     * @return The subscription context for this connection.
+     */
+    SubscriptionContextPtr
+    makeSubscriptionContext(util::TagDecoratorFactory const& factory) override
+    {
+        if (subscriptionContext_ == nullptr) {
+            subscriptionContext_ = std::make_shared<SubscriptionContext>(factory, shared_from_this());
+        }
+        return subscriptionContext_;
     }
 
     /**

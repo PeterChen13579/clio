@@ -19,11 +19,13 @@
 
 #pragma once
 
-#include <ripple/basics/base_uint.h>
-#include <ripple/protocol/AccountID.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/protocol/AccountID.h>
 
+#include <concepts>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <tuple>
 #include <utility>
@@ -232,11 +234,82 @@ struct NFTsAndCursor {
 };
 
 /**
+ * @brief Represents an array of MPTokens
+ */
+struct MPTHoldersAndCursor {
+    std::vector<Blob> mptokens;
+    std::optional<ripple::AccountID> cursor;
+};
+
+/**
  * @brief Stores a range of sequences as a min and max pair.
  */
 struct LedgerRange {
     std::uint32_t minSequence = 0;
     std::uint32_t maxSequence = 0;
+};
+
+/**
+ * @brief Represents an amendment in the XRPL
+ */
+struct Amendment {
+    std::string name;
+    ripple::uint256 feature;
+    bool isSupportedByXRPL = false;
+    bool isSupportedByClio = false;
+    bool isRetired = false;
+
+    /**
+     * @brief Get the amendment Id from its name
+     *
+     * @param name The name of the amendment
+     * @return The amendment Id as uint256
+     */
+    static ripple::uint256
+    GetAmendmentId(std::string_view const name);
+
+    /**
+     * @brief Equality comparison operator
+     * @param other The object to compare to
+     * @return Whether the objects are equal
+     */
+    bool
+    operator==(Amendment const& other) const
+    {
+        return name == other.name;
+    }
+};
+
+/**
+ * @brief A helper for amendment name to feature conversions
+ */
+struct AmendmentKey {
+    std::string name;
+
+    /**
+     * @brief Construct a new AmendmentKey
+     * @param val Anything convertible to a string
+     */
+    AmendmentKey(std::convertible_to<std::string> auto&& val) : name{std::forward<decltype(val)>(val)}
+    {
+    }
+
+    /** @brief Conversion to string */
+    operator std::string const&() const;
+
+    /** @brief Conversion to string_view */
+    operator std::string_view() const;
+
+    /** @brief Conversion to uint256 */
+    operator ripple::uint256() const;
+
+    /**
+     * @brief Comparison operators
+     * @param other The object to compare to
+     * @return Whether the objects are equal, greater or less
+     */
+    auto
+    operator<=>(AmendmentKey const& other) const = default;
 };
 
 constexpr ripple::uint256 firstKey{"0000000000000000000000000000000000000000000000000000000000000000"};

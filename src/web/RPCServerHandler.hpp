@@ -28,8 +28,8 @@
 #include "util/JsonUtils.hpp"
 #include "util/Profiler.hpp"
 #include "util/Taggable.hpp"
-#include "util/config/Config.hpp"
 #include "util/log/Logger.hpp"
+#include "util/newconfig/ConfigDefinition.hpp"
 #include "web/impl/ErrorHandling.hpp"
 #include "web/interface/ConnectionBase.hpp"
 
@@ -40,7 +40,7 @@
 #include <boost/json/parse.hpp>
 #include <boost/json/serialize.hpp>
 #include <boost/system/system_error.hpp>
-#include <ripple/protocol/jss.h>
+#include <xrpl/protocol/jss.h>
 
 #include <chrono>
 #include <exception>
@@ -79,7 +79,7 @@ public:
      * @param etl The ETL to use
      */
     RPCServerHandler(
-        util::Config const& config,
+        util::config::ClioConfigDefinition const& config,
         std::shared_ptr<BackendInterface const> const& backend,
         std::shared_ptr<RPCEngineType> const& rpcEngine,
         std::shared_ptr<ETLType const> const& etl
@@ -88,7 +88,7 @@ public:
         , rpcEngine_(rpcEngine)
         , etl_(etl)
         , tagFactory_(config)
-        , apiVersionParser_(config.sectionOr("api_version", {}))
+        , apiVersionParser_(config.getObject("api_version"))
     {
     }
 
@@ -151,7 +151,9 @@ private:
             if (!range) {
                 // for error that happened before the handler, we don't attach any warnings
                 rpcEngine_->notifyNotReady();
-                return web::impl::ErrorHelper(connection, std::move(request)).sendNotReadyError();
+                web::impl::ErrorHelper(connection, std::move(request)).sendNotReadyError();
+
+                return;
             }
 
             auto const context = [&] {
@@ -159,11 +161,12 @@ private:
                     return rpc::make_WsContext(
                         yield,
                         request,
-                        connection,
+                        connection->makeSubscriptionContext(tagFactory_),
                         tagFactory_.with(connection->tag()),
                         *range,
                         connection->clientIp,
-                        std::cref(apiVersionParser_)
+                        std::cref(apiVersionParser_),
+                        connection->isAdmin()
                     );
                 }
                 return rpc::make_HttpContext(
@@ -185,7 +188,9 @@ private:
                 // we count all those as BadSyntax - as the WS path would.
                 // Although over HTTP these will yield a 400 status with a plain text response (for most).
                 rpcEngine_->notifyBadSyntax();
-                return web::impl::ErrorHelper(connection, std::move(request)).sendError(err);
+                web::impl::ErrorHelper(connection, std::move(request)).sendError(err);
+
+                return;
             }
 
             auto [result, timeDiff] = util::timed([&]() { return rpcEngine_->buildResponse(*context); });
@@ -194,7 +199,8 @@ private:
             rpc::logDuration(*context, us);
 
             boost::json::object response;
-            if (auto const status = std::get_if<rpc::Status>(&result)) {
+
+            if (auto const status = std::get_if<rpc::Status>(&result.response)) {
                 // note: error statuses are counted/notified in buildResponse itself
                 response = web::impl::ErrorHelper(connection, request).composeError(*status);
                 auto const responseStr = boost::json::serialize(response);
@@ -205,7 +211,7 @@ private:
                 // This can still technically be an error. Clio counts forwarded requests as successful.
                 rpcEngine_->notifyComplete(context->method, us);
 
-                auto& json = std::get<boost::json::object>(result);
+                auto& json = std::get<boost::json::object>(result.response);
                 auto const isForwarded =
                     json.contains("forwarded") && json.at("forwarded").is_bool() && json.at("forwarded").as_bool();
 
@@ -246,7 +252,7 @@ private:
                 }
             }
 
-            boost::json::array warnings;
+            boost::json::array warnings = std::move(result.warnings);
             warnings.emplace_back(rpc::makeWarning(rpc::warnRPC_CLIO));
 
             if (etl_->lastCloseAgeSeconds() >= 60)
@@ -261,7 +267,9 @@ private:
             LOG(log_.error()) << connection->tag() << "Caught exception: " << ex.what();
 
             rpcEngine_->notifyInternalError();
-            return web::impl::ErrorHelper(connection, std::move(request)).sendInternalError();
+            web::impl::ErrorHelper(connection, std::move(request)).sendInternalError();
+
+            return;
         }
     }
 

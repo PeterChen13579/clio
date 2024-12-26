@@ -22,6 +22,7 @@
 #include "data/BackendInterface.hpp"
 #include "data/DBHelpers.hpp"
 #include "data/Types.hpp"
+#include "etl/MPTHelpers.hpp"
 #include "etl/NFTHelpers.hpp"
 #include "etl/SystemState.hpp"
 #include "etl/impl/LedgerFetcher.hpp"
@@ -30,13 +31,13 @@
 #include "util/Profiler.hpp"
 #include "util/log/Logger.hpp"
 
-#include <ripple/basics/base_uint.h>
-#include <ripple/basics/strHex.h>
-#include <ripple/beast/core/CurrentThreadName.h>
-#include <ripple/protocol/LedgerHeader.h>
-#include <ripple/protocol/STTx.h>
-#include <ripple/protocol/Serializer.h>
-#include <ripple/protocol/TxMeta.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/basics/strHex.h>
+#include <xrpl/beast/core/CurrentThreadName.h>
+#include <xrpl/protocol/LedgerHeader.h>
+#include <xrpl/protocol/STTx.h>
+#include <xrpl/protocol/Serializer.h>
+#include <xrpl/protocol/TxMeta.h>
 
 #include <chrono>
 #include <cstddef>
@@ -55,6 +56,7 @@ struct FormattedTransactionsData {
     std::vector<AccountTransactionsData> accountTxData;
     std::vector<NFTTransactionsData> nfTokenTxData;
     std::vector<NFTsData> nfTokensData;
+    std::vector<MPTHolderData> mptHoldersData;
 };
 
 namespace etl::impl {
@@ -124,6 +126,10 @@ public:
             if (maybeNFT)
                 result.nfTokensData.push_back(*maybeNFT);
 
+            auto const maybeMPTHolder = getMPTHolderFromTx(txMeta, sttx);
+            if (maybeMPTHolder)
+                result.mptHoldersData.push_back(*maybeMPTHolder);
+
             result.accountTxData.emplace_back(txMeta, sttx.getTransactionID());
             static constexpr std::size_t KEY_SIZE = 32;
             std::string keyStr{reinterpret_cast<char const*>(sttx.getTransactionID().data()), KEY_SIZE};
@@ -136,20 +142,7 @@ public:
             );
         }
 
-        // Remove all but the last NFTsData for each id. unique removes all but the first of a group, so we want to
-        // reverse sort by transaction index
-        std::sort(result.nfTokensData.begin(), result.nfTokensData.end(), [](NFTsData const& a, NFTsData const& b) {
-            return a.tokenID > b.tokenID && a.transactionIndex > b.transactionIndex;
-        });
-
-        // Now we can unique the NFTs by tokenID.
-        auto last = std::unique(
-            result.nfTokensData.begin(),
-            result.nfTokensData.end(),
-            [](NFTsData const& a, NFTsData const& b) { return a.tokenID == b.tokenID; }
-        );
-        result.nfTokensData.erase(last, result.nfTokensData.end());
-
+        result.nfTokensData = getUniqueNFTsDatas(result.nfTokensData);
         return result;
     }
 
@@ -197,58 +190,55 @@ public:
             // asyncWriter consumes from the queue and inserts the data into the
             // Ledger object. Once the below call returns, all data has been pushed
             // into the queue
-            auto [edgeKeys, success] = loadBalancer_->loadInitialLedger(sequence);
+            auto edgeKeys = loadBalancer_->loadInitialLedger(sequence);
 
-            if (success) {
-                size_t numWrites = 0;
-                backend_->cache().setFull();
+            size_t numWrites = 0;
+            backend_->cache().setFull();
 
-                auto seconds = ::util::timed<std::chrono::seconds>([this, edgeKeys = &edgeKeys, sequence, &numWrites] {
-                    for (auto& key : *edgeKeys) {
-                        LOG(log_.debug()) << "Writing edge key = " << ripple::strHex(key);
-                        auto succ = backend_->cache().getSuccessor(*ripple::uint256::fromVoidChecked(key), sequence);
-                        if (succ)
-                            backend_->writeSuccessor(std::move(key), sequence, uint256ToString(succ->key));
-                    }
+            auto seconds = ::util::timed<std::chrono::seconds>([this, keys = std::move(edgeKeys), sequence, &numWrites](
+                                                               ) mutable {
+                for (auto& key : keys) {
+                    LOG(log_.debug()) << "Writing edge key = " << ripple::strHex(key);
+                    auto succ = backend_->cache().getSuccessor(*ripple::uint256::fromVoidChecked(key), sequence);
+                    if (succ)
+                        backend_->writeSuccessor(std::move(key), sequence, uint256ToString(succ->key));
+                }
 
-                    ripple::uint256 prev = data::firstKey;
-                    while (auto cur = backend_->cache().getSuccessor(prev, sequence)) {
-                        ASSERT(cur.has_value(), "Succesor for key {} must exist", ripple::strHex(prev));
-                        if (prev == data::firstKey)
-                            backend_->writeSuccessor(uint256ToString(prev), sequence, uint256ToString(cur->key));
+                ripple::uint256 prev = data::firstKey;
+                while (auto cur = backend_->cache().getSuccessor(prev, sequence)) {
+                    ASSERT(cur.has_value(), "Succesor for key {} must exist", ripple::strHex(prev));
+                    if (prev == data::firstKey)
+                        backend_->writeSuccessor(uint256ToString(prev), sequence, uint256ToString(cur->key));
 
-                        if (isBookDir(cur->key, cur->blob)) {
-                            auto base = getBookBase(cur->key);
-                            // make sure the base is not an actual object
-                            if (!backend_->cache().get(base, sequence)) {
-                                auto succ = backend_->cache().getSuccessor(base, sequence);
-                                ASSERT(succ.has_value(), "Book base {} must have a successor", ripple::strHex(base));
-                                if (succ->key == cur->key) {
-                                    LOG(log_.debug()) << "Writing book successor = " << ripple::strHex(base) << " - "
-                                                      << ripple::strHex(cur->key);
+                    if (isBookDir(cur->key, cur->blob)) {
+                        auto base = getBookBase(cur->key);
+                        // make sure the base is not an actual object
+                        if (!backend_->cache().get(base, sequence)) {
+                            auto succ = backend_->cache().getSuccessor(base, sequence);
+                            ASSERT(succ.has_value(), "Book base {} must have a successor", ripple::strHex(base));
+                            if (succ->key == cur->key) {
+                                LOG(log_.debug()) << "Writing book successor = " << ripple::strHex(base) << " - "
+                                                  << ripple::strHex(cur->key);
 
-                                    backend_->writeSuccessor(
-                                        uint256ToString(base), sequence, uint256ToString(cur->key)
-                                    );
-                                }
+                                backend_->writeSuccessor(uint256ToString(base), sequence, uint256ToString(cur->key));
                             }
-
-                            ++numWrites;
                         }
 
-                        prev = cur->key;
-                        static constexpr std::size_t LOG_INTERVAL = 100000;
-                        if (numWrites % LOG_INTERVAL == 0 && numWrites != 0)
-                            LOG(log_.info()) << "Wrote " << numWrites << " book successors";
+                        ++numWrites;
                     }
 
-                    backend_->writeSuccessor(uint256ToString(prev), sequence, uint256ToString(data::lastKey));
-                    ++numWrites;
-                });
+                    prev = cur->key;
+                    static constexpr std::size_t LOG_INTERVAL = 100000;
+                    if (numWrites % LOG_INTERVAL == 0 && numWrites != 0)
+                        LOG(log_.info()) << "Wrote " << numWrites << " book successors";
+                }
 
-                LOG(log_.info()) << "Looping through cache and submitting all writes took " << seconds
-                                 << " seconds. numWrites = " << std::to_string(numWrites);
-            }
+                backend_->writeSuccessor(uint256ToString(prev), sequence, uint256ToString(data::lastKey));
+                ++numWrites;
+            });
+
+            LOG(log_.info()) << "Looping through cache and submitting all writes took " << seconds
+                             << " seconds. numWrites = " << std::to_string(numWrites);
 
             LOG(log_.debug()) << "Loaded initial ledger";
 
@@ -256,6 +246,7 @@ public:
                 backend_->writeAccountTransactions(std::move(insertTxResult.accountTxData));
                 backend_->writeNFTs(insertTxResult.nfTokensData);
                 backend_->writeNFTTransactions(insertTxResult.nfTokenTxData);
+                backend_->writeMPTHolders(insertTxResult.mptHoldersData);
             }
 
             backend_->finishWrites(sequence);

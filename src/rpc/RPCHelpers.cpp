@@ -24,6 +24,7 @@
 #include "rpc/Errors.hpp"
 #include "rpc/JS.hpp"
 #include "rpc/common/Types.hpp"
+#include "util/AccountUtils.hpp"
 #include "util/Profiler.hpp"
 #include "util/log/Logger.hpp"
 #include "web/Context.hpp"
@@ -35,49 +36,52 @@
 #include <boost/json/array.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/parse.hpp>
+#include <boost/json/serialize.hpp>
 #include <boost/json/string.hpp>
 #include <boost/json/value.hpp>
 #include <boost/json/value_to.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/lexical_cast/bad_lexical_cast.hpp>
 #include <fmt/core.h>
-#include <ripple/basics/Slice.h>
-#include <ripple/basics/StringUtilities.h>
-#include <ripple/basics/XRPAmount.h>
-#include <ripple/basics/base_uint.h>
-#include <ripple/basics/chrono.h>
-#include <ripple/basics/strHex.h>
-#include <ripple/beast/utility/Zero.h>
-#include <ripple/json/json_value.h>
-#include <ripple/protocol/AccountID.h>
-#include <ripple/protocol/Book.h>
-#include <ripple/protocol/ErrorCodes.h>
-#include <ripple/protocol/Indexes.h>
-#include <ripple/protocol/Issue.h>
-#include <ripple/protocol/Keylet.h>
-#include <ripple/protocol/LedgerFormats.h>
-#include <ripple/protocol/LedgerHeader.h>
-#include <ripple/protocol/NFTSyntheticSerializer.h>
-#include <ripple/protocol/PublicKey.h>
-#include <ripple/protocol/Rate.h>
-#include <ripple/protocol/SField.h>
-#include <ripple/protocol/STAmount.h>
-#include <ripple/protocol/STBase.h>
-#include <ripple/protocol/STLedgerEntry.h>
-#include <ripple/protocol/STObject.h>
-#include <ripple/protocol/STTx.h>
-#include <ripple/protocol/Seed.h>
-#include <ripple/protocol/Serializer.h>
-#include <ripple/protocol/TER.h>
-#include <ripple/protocol/TxFormats.h>
-#include <ripple/protocol/TxMeta.h>
-#include <ripple/protocol/UintTypes.h>
-#include <ripple/protocol/jss.h>
-#include <ripple/protocol/nftPageMask.h>
-#include <ripple/protocol/tokens.h>
+#include <xrpl/basics/Slice.h>
+#include <xrpl/basics/StringUtilities.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/basics/chrono.h>
+#include <xrpl/basics/strHex.h>
+#include <xrpl/beast/utility/Zero.h>
+#include <xrpl/json/json_reader.h>
+#include <xrpl/json/json_value.h>
+#include <xrpl/protocol/AccountID.h>
+#include <xrpl/protocol/Book.h>
+#include <xrpl/protocol/ErrorCodes.h>
+#include <xrpl/protocol/Indexes.h>
+#include <xrpl/protocol/Issue.h>
+#include <xrpl/protocol/Keylet.h>
+#include <xrpl/protocol/LedgerFormats.h>
+#include <xrpl/protocol/LedgerHeader.h>
+#include <xrpl/protocol/NFTSyntheticSerializer.h>
+#include <xrpl/protocol/PublicKey.h>
+#include <xrpl/protocol/Rate.h>
+#include <xrpl/protocol/SField.h>
+#include <xrpl/protocol/STAmount.h>
+#include <xrpl/protocol/STBase.h>
+#include <xrpl/protocol/STLedgerEntry.h>
+#include <xrpl/protocol/STObject.h>
+#include <xrpl/protocol/STTx.h>
+#include <xrpl/protocol/Seed.h>
+#include <xrpl/protocol/Serializer.h>
+#include <xrpl/protocol/TER.h>
+#include <xrpl/protocol/TxFormats.h>
+#include <xrpl/protocol/TxMeta.h>
+#include <xrpl/protocol/UintTypes.h>
+#include <xrpl/protocol/XRPAmount.h>
+#include <xrpl/protocol/jss.h>
+#include <xrpl/protocol/nftPageMask.h>
+#include <xrpl/protocol/tokens.h>
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -109,7 +113,7 @@ parseAccountCursor(std::optional<std::string> jsonCursor)
     std::uint64_t startHint = 0;
 
     if (!jsonCursor)
-        return AccountCursor({cursorIndex, startHint});
+        return AccountCursor({.index = cursorIndex, .hint = startHint});
 
     // Cursor is composed of a comma separated index and start hint. The
     // former will be read as hex, and the latter using boost lexical cast.
@@ -130,7 +134,7 @@ parseAccountCursor(std::optional<std::string> jsonCursor)
         return {};
     }
 
-    return AccountCursor({cursorIndex, startHint});
+    return AccountCursor({.index = cursorIndex, .hint = startHint});
 }
 
 std::optional<ripple::STAmount>
@@ -186,20 +190,17 @@ accountFromStringStrict(std::string const& account)
     if (blob && ripple::publicKeyType(ripple::makeSlice(*blob))) {
         publicKey = ripple::PublicKey(ripple::Slice{blob->data(), blob->size()});
     } else {
-        publicKey = ripple::parseBase58<ripple::PublicKey>(ripple::TokenType::AccountPublic, account);
+        publicKey = util::parseBase58Wrapper<ripple::PublicKey>(ripple::TokenType::AccountPublic, account);
     }
 
     std::optional<ripple::AccountID> result;
     if (publicKey) {
         result = ripple::calcAccountID(*publicKey);
     } else {
-        result = ripple::parseBase58<ripple::AccountID>(account);
+        result = util::parseBase58Wrapper<ripple::AccountID>(account);
     }
 
-    if (result) {
-        return result.value();
-    }
-    return {};
+    return result;
 }
 
 std::pair<std::shared_ptr<ripple::STTx const>, std::shared_ptr<ripple::STObject const>>
@@ -219,8 +220,8 @@ deserializeTxPlusMeta(data::TransactionAndMetadata const& blobs)
     } catch (std::exception const& e) {
         std::stringstream txn;
         std::stringstream meta;
-        std::copy(blobs.transaction.begin(), blobs.transaction.end(), std::ostream_iterator<unsigned char>(txn));
-        std::copy(blobs.metadata.begin(), blobs.metadata.end(), std::ostream_iterator<unsigned char>(meta));
+        std::ranges::copy(blobs.transaction, std::ostream_iterator<unsigned char>(txn));
+        std::ranges::copy(blobs.metadata, std::ostream_iterator<unsigned char>(meta));
         LOG(gLog.error()) << "Failed to deserialize transaction. txn = " << txn.str() << " - meta = " << meta.str()
                           << " txn length = " << std::to_string(blobs.transaction.size())
                           << " meta length = " << std::to_string(blobs.metadata.size());
@@ -259,6 +260,7 @@ toExpandedJson(
     auto metaJson = toJson(*meta);
     insertDeliveredAmount(metaJson, txn, meta, blobs.date);
     insertDeliverMaxAlias(txnJson, apiVersion);
+    insertMPTIssuanceID(metaJson, txn, meta);
 
     if (nftEnabled == NFTokenjson::ENABLE) {
         Json::Value nftJson;
@@ -314,6 +316,67 @@ insertDeliveredAmount(
     return false;
 }
 
+/**
+ * @brief Get the delivered amount
+ *
+ * @param meta The metadata
+ * @return The mpt_issuance_id or std::nullopt if not available
+ */
+static std::optional<ripple::uint192>
+getMPTIssuanceID(std::shared_ptr<ripple::TxMeta const> const& meta)
+{
+    ripple::TxMeta const& transactionMeta = *meta;
+
+    for (ripple::STObject const& node : transactionMeta.getNodes()) {
+        if (node.getFieldU16(ripple::sfLedgerEntryType) != ripple::ltMPTOKEN_ISSUANCE ||
+            node.getFName() != ripple::sfCreatedNode)
+            continue;
+
+        auto const& mptNode = node.peekAtField(ripple::sfNewFields).downcast<ripple::STObject>();
+        return ripple::makeMptID(mptNode[ripple::sfSequence], mptNode[ripple::sfIssuer]);
+    }
+
+    return {};
+}
+
+/**
+ * @brief Check if transaction has a new MPToken created
+ *
+ * @param txn The transaction
+ * @param meta The metadata
+ * @return true if the transaction can have a mpt_issuance_id
+ */
+static bool
+canHaveMPTIssuanceID(std::shared_ptr<ripple::STTx const> const& txn, std::shared_ptr<ripple::TxMeta const> const& meta)
+{
+    if (txn->getTxnType() != ripple::ttMPTOKEN_ISSUANCE_CREATE)
+        return false;
+
+    if (meta->getResultTER() != ripple::tesSUCCESS)
+        return false;
+
+    return true;
+}
+
+bool
+insertMPTIssuanceID(
+    boost::json::object& metaJson,
+    std::shared_ptr<ripple::STTx const> const& txn,
+    std::shared_ptr<ripple::TxMeta const> const& meta
+)
+{
+    if (!canHaveMPTIssuanceID(txn, meta))
+        return false;
+
+    if (auto const id = getMPTIssuanceID(meta)) {
+        metaJson[JS(mpt_issuance_id)] = ripple::to_string(*id);
+        return true;
+    }
+
+    assert(false);
+    return false;
+}
+
 void
 insertDeliverMaxAlias(boost::json::object& txJson, std::uint32_t const apiVersion)
 {
@@ -361,7 +424,7 @@ toJson(ripple::LedgerHeader const& lgrInfo, bool const binary, std::uint32_t con
 {
     boost::json::object header;
     if (binary) {
-        header[JS(ledger_data)] = ripple::strHex(ledgerInfoToBlob(lgrInfo));
+        header[JS(ledger_data)] = ripple::strHex(ledgerHeaderToBlob(lgrInfo));
     } else {
         header[JS(account_hash)] = ripple::strHex(lgrInfo.accountHash);
         header[JS(close_flags)] = lgrInfo.closeFlags;
@@ -399,7 +462,7 @@ parseStringAsUInt(std::string const& value)
 }
 
 std::variant<Status, ripple::LedgerHeader>
-ledgerInfoFromRequest(std::shared_ptr<data::BackendInterface const> const& backend, web::Context const& ctx)
+ledgerHeaderFromRequest(std::shared_ptr<data::BackendInterface const> const& backend, web::Context const& ctx)
 {
     auto hashValue = ctx.params.contains("ledger_hash") ? ctx.params.at("ledger_hash") : nullptr;
 
@@ -430,8 +493,9 @@ ledgerInfoFromRequest(std::shared_ptr<data::BackendInterface const> const& backe
             } else {
                 ledgerSequence = parseStringAsUInt(stringIndex);
             }
-        } else if (indexValue.is_int64())
+        } else if (indexValue.is_int64()) {
             ledgerSequence = indexValue.as_int64();
+        }
     } else {
         ledgerSequence = ctx.range.maxSequence;
     }
@@ -447,9 +511,9 @@ ledgerInfoFromRequest(std::shared_ptr<data::BackendInterface const> const& backe
     return *lgrInfo;
 }
 
-// extract ledgerInfoFromRequest's parameter from context
+// extract ledgerHeaderFromRequest's parameter from context
 std::variant<Status, ripple::LedgerHeader>
-getLedgerInfoFromHashOrSeq(
+getLedgerHeaderFromHashOrSeq(
     BackendInterface const& backend,
     boost::asio::yield_context yield,
     std::optional<std::string> ledgerHash,
@@ -482,7 +546,7 @@ getLedgerInfoFromHashOrSeq(
 }
 
 std::vector<unsigned char>
-ledgerInfoToBlob(ripple::LedgerHeader const& info, bool includeHash)
+ledgerHeaderToBlob(ripple::LedgerHeader const& info, bool includeHash)
 {
     ripple::Serializer s;
     s.add32(info.seq);
@@ -545,7 +609,7 @@ traverseNFTObjects(
 
     if (!page) {
         if (nextPage == beast::zero) {  // no nft objects in lastNFTPage
-            return AccountCursor{beast::zero, 0};
+            return AccountCursor{.index = beast::zero, .hint = 0};
         }
         // marker is in the right range, but still invalid
         return Status{RippledError::rpcINVALID_PARAMS, "Invalid marker."};
@@ -562,13 +626,13 @@ traverseNFTObjects(
         count++;
 
         if (count == limit or nftPreviousPage == beast::zero)
-            return AccountCursor{nftPreviousPage, count};
+            return AccountCursor{.index = nftPreviousPage, .hint = count};
 
         page = backend.fetchLedgerObject(nftPreviousPage, sequence, yield);
         pageSLE = ripple::SLE{ripple::SerialIter{page->data(), page->size()}, nftPreviousPage};
     }
 
-    return AccountCursor{beast::zero, 0};
+    return AccountCursor{.index = beast::zero, .hint = 0};
 }
 
 std::variant<Status, AccountCursor>
@@ -607,7 +671,7 @@ traverseOwnedNodes(
 
         // if limit reach , we return the next page and max as marker
         if (nftsCount >= limit)
-            return AccountCursor{nextNFTPage, std::numeric_limits<uint32_t>::max()};
+            return AccountCursor{.index = nextNFTPage, .hint = std::numeric_limits<uint32_t>::max()};
 
         // adjust limit ,continue traversing owned nodes
         limit -= nftsCount;
@@ -636,7 +700,7 @@ traverseOwnedNodes(
     std::function<void(ripple::SLE)> atOwnedNode
 )
 {
-    auto cursor = AccountCursor({beast::zero, 0});
+    auto cursor = AccountCursor({.index = beast::zero, .hint = 0});
 
     auto const rootIndex = owner;
     auto currentIndex = rootIndex;
@@ -664,7 +728,7 @@ traverseOwnedNodes(
         ripple::SLE const hintDirSle{hintDirIt, hintIndex.key};
 
         if (auto const& indexes = hintDirSle.getFieldV256(ripple::sfIndexes);
-            std::find(std::begin(indexes), std::end(indexes), hexMarker) == std::end(indexes)) {
+            std::ranges::find(indexes, hexMarker) == std::end(indexes)) {
             // the index specified by marker is not in the page specified by marker
             return Status(ripple::rpcINVALID_PARAMS, "Invalid marker.");
         }
@@ -694,7 +758,7 @@ traverseOwnedNodes(
             }
 
             if (limit == 0) {
-                cursor = AccountCursor({keys.back(), currentPage});
+                cursor = AccountCursor({.index = keys.back(), .hint = currentPage});
                 break;
             }
             // the next page
@@ -723,7 +787,7 @@ traverseOwnedNodes(
             }
 
             if (limit == 0) {
-                cursor = AccountCursor({keys.back(), currentPage});
+                cursor = AccountCursor({.index = keys.back(), .hint = currentPage});
                 break;
             }
 
@@ -755,7 +819,7 @@ traverseOwnedNodes(
     if (limit == 0)
         return cursor;
 
-    return AccountCursor({beast::zero, 0});
+    return AccountCursor({.index = beast::zero, .hint = 0});
 }
 
 std::shared_ptr<ripple::SLE const>
@@ -802,7 +866,7 @@ getAccountsFromTransaction(boost::json::object const& transaction)
             auto inObject = getAccountsFromTransaction(value.as_object());
             accounts.insert(accounts.end(), inObject.begin(), inObject.end());
         } else if (value.is_string()) {
-            auto const account = ripple::parseBase58<ripple::AccountID>(boost::json::value_to<std::string>(value));
+            auto const account = util::parseBase58Wrapper<ripple::AccountID>(boost::json::value_to<std::string>(value));
             if (account) {
                 accounts.push_back(*account);
             }
@@ -949,7 +1013,8 @@ accountHolds(
     auto const blob = backend.fetchLedgerObject(key, sequence, yield);
 
     if (!blob) {
-        amount.clear({currency, issuer});
+        amount.setIssue(ripple::Issue(currency, issuer));
+        amount.clear();
         return amount;
     }
 
@@ -957,7 +1022,8 @@ accountHolds(
     ripple::SLE const sle{it, key};
 
     if (zeroIfFrozen && isFrozen(backend, sequence, account, currency, issuer, yield)) {
-        amount.clear(ripple::Issue(currency, issuer));
+        amount.setIssue(ripple::Issue(currency, issuer));
+        amount.clear();
     } else {
         amount = sle.getFieldAmount(ripple::sfBalance);
         if (account > issuer) {
@@ -1275,6 +1341,31 @@ specifiesCurrentOrClosedLedger(boost::json::object const& request)
     return false;
 }
 
+bool
+isAdminCmd(std::string const& method, boost::json::object const& request)
+{
+    if (method == JS(ledger)) {
+        auto const requestStr = boost::json::serialize(request);
+        Json::Value jv;
+        Json::Reader{}.parse(requestStr, jv);
+        // rippled considers string/non-zero int/non-empty array/ non-empty json as true.
+        // Use rippled's API asBool to get the same result.
+        // https://github.com/XRPLF/rippled/issues/5119
+        auto const isFieldSet = [&jv](auto const field) { return jv.isMember(field) and jv[field].asBool(); };
+
+        // According to doc
+        // https://xrpl.org/docs/references/http-websocket-apis/public-api-methods/ledger-methods/ledger,
+        // full/accounts/type are admin only, but type only works when full/accounts are set, so we don't need to check
+        // type.
+        if (isFieldSet(JS(full)) or isFieldSet(JS(accounts)))
+            return true;
+    }
+
+    if (method == JS(feature) and request.contains(JS(vetoed)))
+        return true;
+    return false;
+}
+
 std::variant<ripple::uint256, Status>
 getNFTID(boost::json::object const& request)
 {
@@ -1289,25 +1380,6 @@ getNFTID(boost::json::object const& request)
         return Status{RippledError::rpcINVALID_PARAMS, "malformedTokenID"};
 
     return tokenid;
-}
-
-bool
-isAmendmentEnabled(
-    std::shared_ptr<data::BackendInterface const> const& backend,
-    boost::asio::yield_context yield,
-    uint32_t seq,
-    ripple::uint256 amendmentId
-)
-{
-    // the amendments should always be present in ledger
-    auto const& amendments = backend->fetchLedgerObject(ripple::keylet::amendments().key, seq, yield);
-
-    ripple::SLE const amendmentsSLE{
-        ripple::SerialIter{amendments->data(), amendments->size()}, ripple::keylet::amendments().key
-    };
-
-    auto const listAmendments = amendmentsSLE.getFieldV256(ripple::sfAmendments);
-    return std::find(listAmendments.begin(), listAmendments.end(), amendmentId) != listAmendments.end();
 }
 
 boost::json::object

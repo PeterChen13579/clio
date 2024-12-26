@@ -21,7 +21,7 @@
 #pragma once
 
 #include <boost/json/object.hpp>
-#include <ripple/protocol/ErrorCodes.h>
+#include <xrpl/protocol/ErrorCodes.h>
 
 #include <exception>
 #include <optional>
@@ -43,6 +43,7 @@ enum class ClioError {
     rpcUNKNOWN_OPTION = 5005,
     rpcFIELD_NOT_FOUND_TRANSACTION = 5006,
     rpcMALFORMED_ORACLE_DOCUMENT_ID = 5007,
+    rpcMALFORMED_AUTHORIZED_CREDENTIALS = 5008,
 
     // special system errors start with 6000
     rpcINVALID_API_VERSION = 6000,
@@ -50,6 +51,14 @@ enum class ClioError {
     rpcCOMMAND_NOT_STRING = 6002,
     rpcCOMMAND_IS_EMPTY = 6003,
     rpcPARAMS_UNPARSEABLE = 6004,
+
+    // TODO: Since it is not only rpc errors here now, we should move it to util
+    // etl related errors start with 7000
+    // Higher value in this errors means better progress in the forwarding
+    etlCONNECTION_ERROR = 7000,
+    etlREQUEST_ERROR = 7001,
+    etlREQUEST_TIMEOUT = 7002,
+    etlINVALID_RESPONSE = 7003,
 };
 
 /** @brief Holds info about a particular @ref ClioError. */
@@ -128,6 +137,9 @@ struct Status {
     {
     }
 
+    bool
+    operator==(Status const& other) const = default;
+
     /**
      * @brief Check if the status is not OK
      *
@@ -173,7 +185,13 @@ struct Status {
 };
 
 /** @brief Warning codes that can be returned by clio. */
-enum WarningCode { warnUNKNOWN = -1, warnRPC_CLIO = 2001, warnRPC_OUTDATED = 2002, warnRPC_RATE_LIMIT = 2003 };
+enum WarningCode {
+    warnUNKNOWN = -1,
+    warnRPC_CLIO = 2001,
+    warnRPC_OUTDATED = 2002,
+    warnRPC_RATE_LIMIT = 2003,
+    warnRPC_DEPRECATED = 2004
+};
 
 /** @brief Holds information about a clio warning. */
 struct WarningInfo {

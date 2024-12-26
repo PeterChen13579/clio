@@ -19,12 +19,17 @@
 
 #pragma once
 
-#include "util/Expected.hpp"
+#include "util/WithTimeout.hpp"
 #include "util/requests/Types.hpp"
 #include "util/requests/WsConnection.hpp"
 
+#include <boost/asio/associated_executor.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/buffer.hpp>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/cancellation_type.hpp>
 #include <boost/asio/spawn.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/beast/core/buffers_to_string.hpp>
 #include <boost/beast/core/error.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
@@ -33,8 +38,12 @@
 #include <boost/beast/websocket/rfc6455.hpp>
 #include <boost/beast/websocket/stream.hpp>
 #include <boost/beast/websocket/stream_base.hpp>
+#include <boost/system/errc.hpp>
 
+#include <atomic>
 #include <chrono>
+#include <expected>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -50,25 +59,40 @@ public:
     {
     }
 
-    Expected<std::string, RequestError>
-    read(boost::asio::yield_context yield) override
+    std::expected<std::string, RequestError>
+    read(boost::asio::yield_context yield, std::optional<std::chrono::steady_clock::duration> timeout = std::nullopt)
+        override
     {
         boost::beast::error_code errorCode;
         boost::beast::flat_buffer buffer;
 
-        ws_.async_read(buffer, yield[errorCode]);
+        auto operation = [&](auto&& token) { ws_.async_read(buffer, token); };
+        if (timeout) {
+            errorCode = util::withTimeout(operation, yield[errorCode], *timeout);
+        } else {
+            operation(yield[errorCode]);
+        }
 
         if (errorCode)
-            return Unexpected{RequestError{"Read error", errorCode}};
+            return std::unexpected{RequestError{"Read error", errorCode}};
 
         return boost::beast::buffers_to_string(std::move(buffer).data());
     }
 
     std::optional<RequestError>
-    write(std::string const& message, boost::asio::yield_context yield) override
+    write(
+        std::string const& message,
+        boost::asio::yield_context yield,
+        std::optional<std::chrono::steady_clock::duration> timeout = std::nullopt
+    ) override
     {
         boost::beast::error_code errorCode;
-        ws_.async_write(boost::asio::buffer(message), yield[errorCode]);
+        auto operation = [&](auto&& token) { ws_.async_write(boost::asio::buffer(message), token); };
+        if (timeout) {
+            errorCode = util::withTimeout(operation, yield, *timeout);
+        } else {
+            operation(yield[errorCode]);
+        }
 
         if (errorCode)
             return RequestError{"Write error", errorCode};

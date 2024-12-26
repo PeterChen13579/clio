@@ -6,19 +6,22 @@ Clio is built with [CMake](https://cmake.org/) and uses [Conan](https://conan.io
 
 - [Python 3.7](https://www.python.org/downloads/)
 - [Conan 1.55](https://conan.io/downloads.html)
-- [CMake 3.16](https://cmake.org/download/)
+- [CMake 3.20](https://cmake.org/download/)
 - [**Optional**] [GCovr](https://gcc.gnu.org/onlinedocs/gcc/Gcov.html): needed for code coverage generation
 - [**Optional**] [CCache](https://ccache.dev/): speeds up compilation if you are going to compile Clio often
 
 | Compiler    | Version |
 |-------------|---------|
-| GCC         | 11      |
-| Clang       | 14      |
-| Apple Clang | 14.0.3  |
+| GCC         | 12.3    |
+| Clang       | 16      |
+| Apple Clang | 15      |
 
 ### Conan Configuration
 
-Clio does not require anything but default settings in your (`~/.conan/profiles/default`) Conan profile. It's best to have no extra flags specified.
+Clio does not require anything other than `compiler.cppstd=20` in your (`~/.conan/profiles/default`) Conan profile.
+
+> [!NOTE]
+> Although Clio is built using C++23, it's required to set `compiler.cppstd=20` for the time being as some of Clio's dependencies are not yet capable of building under C++23.
 
 > Mac example:
 
@@ -29,10 +32,12 @@ os_build=Macos
 arch=armv8
 arch_build=armv8
 compiler=apple-clang
-compiler.version=14
+compiler.version=15
 compiler.libcxx=libc++
 build_type=Release
 compiler.cppstd=20
+[conf]
+tools.build:cxxflags+=["-DBOOST_ASIO_DISABLE_CONCEPTS"]
 ```
 
 > Linux example:
@@ -44,7 +49,7 @@ os_build=Linux
 arch=x86_64
 arch_build=x86_64
 compiler=gcc
-compiler.version=11
+compiler.version=12
 compiler.libcxx=libstdc++11
 build_type=Release
 compiler.cppstd=20
@@ -87,6 +92,9 @@ If successful, `conan install` will find the required packages and `cmake` will 
 
 > [!TIP]
 > To generate a Code Coverage report, include `-o coverage=True` in the `conan install` command above, along with `-o tests=True` to enable tests. After running the `cmake` commands, execute `make clio_tests-ccov`. The coverage report will be found at `clio_tests-llvm-cov/index.html`.
+
+> [!NOTE]
+> If you've built Clio before and the build is now failing, it's likely due to updated dependencies. Try deleting the build folder and then rerunning the Conan and CMake commands mentioned above.
 
 ### Generating API docs for Clio
 
@@ -133,3 +141,43 @@ If you wish to develop against a `rippled` instance running in standalone mode t
 
 1. Advance the `rippled` ledger to at least ledger 256.
 2. Wait 10 minutes before first starting Clio against this standalone node.
+
+## Building with a Custom `libxrpl`
+
+Sometimes, during development, you need to build against a custom version of `libxrpl`. (For example, you may be developing compatibility for a proposed amendment that is not yet merged to the main `rippled` codebase.) To build Clio with compatibility for a custom fork or branch of `rippled`, follow these steps:
+
+1. First, pull/clone the appropriate `rippled` fork and switch to the branch you want to build. For example, the following example uses an in-development build with [XLS-33d Multi-Purpose Tokens](https://github.com/XRPLF/XRPL-Standards/tree/master/XLS-0033d-multi-purpose-tokens):
+
+    ```sh
+    git clone https://github.com/shawnxie999/rippled/
+    cd rippled
+    git switch mpt-1.1
+    ```
+
+2. Export a custom package to your local Conan store using a user/channel:
+
+    ```sh
+    conan export . my/feature
+    ```
+
+3. Patch your local Clio build to use the right package.
+
+    Edit `conanfile.py` (from the Clio repository root). Replace the `xrpl` requirement with the custom package version from the previous step. This must also include the current version number from your `rippled` branch. For example:
+
+    ```py
+    # ... (excerpt from conanfile.py)
+        requires = [
+        'boost/1.82.0',
+        'cassandra-cpp-driver/2.17.0',
+        'fmt/10.1.1',
+        'protobuf/3.21.9',
+        'grpc/1.50.1',
+        'openssl/1.1.1u',
+        'xrpl/2.3.0-b1@my/feature', # Update this line
+        'libbacktrace/cci.20210118'
+    ]
+    ```
+
+4. Build Clio as you would have before.
+
+    See [Building Clio](#building-clio) for details.

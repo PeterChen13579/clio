@@ -21,6 +21,7 @@
 
 #include "data/BackendInterface.hpp"
 #include "rpc/JS.hpp"
+#include "rpc/common/Checkers.hpp"
 #include "rpc/common/Specs.hpp"
 #include "rpc/common/Types.hpp"
 #include "rpc/common/Validators.hpp"
@@ -28,7 +29,7 @@
 #include <boost/json/conversion.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
-#include <ripple/protocol/jss.h>
+#include <xrpl/protocol/jss.h>
 
 #include <cstdint>
 #include <memory>
@@ -61,14 +62,16 @@ public:
      * @brief A struct to hold the input data for the command
      *
      * Clio does not support:
-     * - accounts
-     * - full
-     * - owner_finds
      * - queue
+     *
+     * And the following are deprecated altogether:
+     * - full
+     * - accounts
+     * - ledger
      * - type
      *
-     * Clio will throw an error when any of `accounts`/`full`/`owner_funds`/`queue` are set to `true`
-     * @see https://github.com/XRPLF/clio/issues/603
+     * Clio will throw an error when `queue`, `full` or `accounts` is set to `true`.
+     * @see https://github.com/XRPLF/clio/issues/603 and https://github.com/XRPLF/clio/issues/1537
      */
     struct Input {
         std::optional<std::string> ledgerHash;
@@ -102,15 +105,19 @@ public:
     {
         static auto const rpcSpec = RpcSpec{
             {JS(full), validation::Type<bool>{}, validation::NotSupported{true}},
+            {JS(full), check::Deprecated{}},
             {JS(accounts), validation::Type<bool>{}, validation::NotSupported{true}},
+            {JS(accounts), check::Deprecated{}},
             {JS(owner_funds), validation::Type<bool>{}},
             {JS(queue), validation::Type<bool>{}, validation::NotSupported{true}},
-            {JS(ledger_hash), validation::Uint256HexStringValidator},
-            {JS(ledger_index), validation::LedgerIndexValidator},
+            {JS(ledger_hash), validation::CustomValidators::Uint256HexStringValidator},
+            {JS(ledger_index), validation::CustomValidators::LedgerIndexValidator},
             {JS(transactions), validation::Type<bool>{}},
             {JS(expand), validation::Type<bool>{}},
             {JS(binary), validation::Type<bool>{}},
             {"diff", validation::Type<bool>{}},
+            {JS(ledger), check::Deprecated{}},
+            {JS(type), check::Deprecated{}},
         };
 
         return rpcSpec;

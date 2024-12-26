@@ -23,7 +23,7 @@
 #include "util/log/Logger.hpp"
 
 #include <grpcpp/grpcpp.h>
-#include <ripple/proto/org/xrpl/rpc/v1/xrp_ledger.grpc.pb.h>
+#include <xrpl/proto/org/xrpl/rpc/v1/xrp_ledger.grpc.pb.h>
 
 #include <cstdint>
 #include <memory>
@@ -63,7 +63,7 @@ public:
      * @param sequence sequence of the ledger to extract
      * @return Ledger header and transaction+metadata blobs; Empty optional if the server is shutting down
      */
-    OptionalGetLedgerResponseType
+    [[nodiscard]] OptionalGetLedgerResponseType
     fetchData(uint32_t sequence)
     {
         LOG(log_.debug()) << "Attempting to fetch ledger with sequence = " << sequence;
@@ -83,7 +83,7 @@ public:
      * @param sequence sequence of the ledger to extract
      * @return Ledger data diff between sequance and parent; Empty optional if the server is shutting down
      */
-    OptionalGetLedgerResponseType
+    [[nodiscard]] OptionalGetLedgerResponseType
     fetchDataAndDiff(uint32_t sequence)
     {
         LOG(log_.debug()) << "Attempting to fetch ledger with sequence = " << sequence;

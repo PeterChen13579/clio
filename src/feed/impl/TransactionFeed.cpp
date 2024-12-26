@@ -26,21 +26,20 @@
 #include "rpc/RPCHelpers.hpp"
 #include "util/log/Logger.hpp"
 
-#include <boost/asio/post.hpp>
 #include <boost/asio/spawn.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/serialize.hpp>
-#include <ripple/basics/chrono.h>
-#include <ripple/basics/strHex.h>
-#include <ripple/protocol/AccountID.h>
-#include <ripple/protocol/Book.h>
-#include <ripple/protocol/LedgerFormats.h>
-#include <ripple/protocol/LedgerHeader.h>
-#include <ripple/protocol/SField.h>
-#include <ripple/protocol/STObject.h>
-#include <ripple/protocol/TER.h>
-#include <ripple/protocol/TxFormats.h>
-#include <ripple/protocol/jss.h>
+#include <xrpl/basics/chrono.h>
+#include <xrpl/basics/strHex.h>
+#include <xrpl/protocol/AccountID.h>
+#include <xrpl/protocol/Book.h>
+#include <xrpl/protocol/LedgerFormats.h>
+#include <xrpl/protocol/LedgerHeader.h>
+#include <xrpl/protocol/SField.h>
+#include <xrpl/protocol/STObject.h>
+#include <xrpl/protocol/TER.h>
+#include <xrpl/protocol/TxFormats.h>
+#include <xrpl/protocol/jss.h>
 
 #include <cstdint>
 #include <memory>
@@ -54,14 +53,14 @@ namespace feed::impl {
 void
 TransactionFeed::TransactionSlot::operator()(AllVersionTransactionsType const& allVersionMsgs) const
 {
-    if (auto connection = connectionWeakPtr.lock(); connection) {
+    if (auto connection = subscriptionContextWeakPtr.lock(); connection) {
         // Check if this connection already sent
         if (feed.get().notified_.contains(connection.get()))
             return;
 
         feed.get().notified_.insert(connection.get());
 
-        if (connection->apiSubVersion < 2u) {
+        if (connection->apiSubversion() < 2u) {
             connection->send(allVersionMsgs[0]);
             return;
         }
@@ -70,44 +69,56 @@ TransactionFeed::TransactionSlot::operator()(AllVersionTransactionsType const& a
 }
 
 void
-TransactionFeed::sub(SubscriberSharedPtr const& subscriber, std::uint32_t const apiVersion)
+TransactionFeed::sub(SubscriberSharedPtr const& subscriber)
 {
     auto const added = signal_.connectTrackableSlot(subscriber, TransactionSlot(*this, subscriber));
     if (added) {
-        LOG(logger_.debug()) << subscriber->tag() << "Subscribed transactions";
+        LOG(logger_.info()) << subscriber->tag() << "Subscribed transactions";
         ++subAllCount_.get();
-        subscriber->apiSubVersion = apiVersion;
-        subscriber->onDisconnect.connect([this](SubscriberPtr connection) { unsubInternal(connection); });
+        subscriber->onDisconnect([this](SubscriberPtr connection) { unsubInternal(connection); });
     }
 }
 
 void
-TransactionFeed::sub(
-    ripple::AccountID const& account,
-    SubscriberSharedPtr const& subscriber,
-    std::uint32_t const apiVersion
-)
+TransactionFeed::sub(ripple::AccountID const& account, SubscriberSharedPtr const& subscriber)
 {
     auto const added = accountSignal_.connectTrackableSlot(subscriber, account, TransactionSlot(*this, subscriber));
     if (added) {
-        LOG(logger_.debug()) << subscriber->tag() << "Subscribed account " << account;
+        LOG(logger_.info()) << subscriber->tag() << "Subscribed account " << account;
         ++subAccountCount_.get();
-        subscriber->apiSubVersion = apiVersion;
-        subscriber->onDisconnect.connect([this, account](SubscriberPtr connection) {
-            unsubInternal(account, connection);
+        subscriber->onDisconnect([this, account](SubscriberPtr connection) { unsubInternal(account, connection); });
+    }
+}
+
+void
+TransactionFeed::subProposed(SubscriberSharedPtr const& subscriber)
+{
+    auto const added = txProposedSignal_.connectTrackableSlot(subscriber, TransactionSlot(*this, subscriber));
+    if (added) {
+        subscriber->onDisconnect([this](SubscriberPtr connection) { unsubProposedInternal(connection); });
+    }
+}
+
+void
+TransactionFeed::subProposed(ripple::AccountID const& account, SubscriberSharedPtr const& subscriber)
+{
+    auto const added =
+        accountProposedSignal_.connectTrackableSlot(subscriber, account, TransactionSlot(*this, subscriber));
+    if (added) {
+        subscriber->onDisconnect([this, account](SubscriberPtr connection) {
+            unsubProposedInternal(account, connection);
         });
     }
 }
 
 void
-TransactionFeed::sub(ripple::Book const& book, SubscriberSharedPtr const& subscriber, std::uint32_t const apiVersion)
+TransactionFeed::sub(ripple::Book const& book, SubscriberSharedPtr const& subscriber)
 {
     auto const added = bookSignal_.connectTrackableSlot(subscriber, book, TransactionSlot(*this, subscriber));
     if (added) {
-        LOG(logger_.debug()) << subscriber->tag() << "Subscribed book " << book;
+        LOG(logger_.info()) << subscriber->tag() << "Subscribed book " << book;
         ++subBookCount_.get();
-        subscriber->apiSubVersion = apiVersion;
-        subscriber->onDisconnect.connect([this, book](SubscriberPtr connection) { unsubInternal(book, connection); });
+        subscriber->onDisconnect([this, book](SubscriberPtr connection) { unsubInternal(book, connection); });
     }
 }
 
@@ -121,6 +132,18 @@ void
 TransactionFeed::unsub(ripple::AccountID const& account, SubscriberSharedPtr const& subscriber)
 {
     unsubInternal(account, subscriber.get());
+}
+
+void
+TransactionFeed::unsubProposed(SubscriberSharedPtr const& subscriber)
+{
+    unsubProposedInternal(subscriber.get());
+}
+
+void
+TransactionFeed::unsubProposed(ripple::AccountID const& account, SubscriberSharedPtr const& subscriber)
+{
+    unsubProposedInternal(account, subscriber.get());
 }
 
 void
@@ -171,13 +194,14 @@ TransactionFeed::pub(
         }
     }
 
-    auto const genJsonByVersion = [&, tx = tx, meta = meta](std::uint32_t version) {
+    auto const genJsonByVersion = [&, tx, meta](std::uint32_t version) {
         boost::json::object pubObj;
         auto const txKey = version < 2u ? JS(transaction) : JS(tx_json);
         pubObj[txKey] = rpc::toJson(*tx);
         pubObj[JS(meta)] = rpc::toJson(*meta);
         rpc::insertDeliveredAmount(pubObj[JS(meta)].as_object(), tx, meta, txMeta.date);
         rpc::insertDeliverMaxAlias(pubObj[txKey].as_object(), version);
+        rpc::insertMPTIssuanceID(pubObj[JS(meta)].as_object(), tx, meta);
 
         pubObj[JS(type)] = "transaction";
         pubObj[JS(validated)] = true;
@@ -250,35 +274,37 @@ TransactionFeed::pub(
         }
     }
 
-    boost::asio::post(
-        strand_,
-        [this,
-         allVersionsMsgs = std::move(allVersionsMsgs),
-         affectedAccounts = std::move(affectedAccounts),
-         affectedBooks = std::move(affectedBooks)]() {
-            notified_.clear();
-            signal_.emit(allVersionsMsgs);
-            notified_.clear();
-            // check duplicate for accounts, this prevents sending the same message multiple times if it touches
-            // multiple accounts watched by the same connection
-            for (auto const& account : affectedAccounts) {
-                accountSignal_.emit(account, allVersionsMsgs);
-            }
-            notified_.clear();
-            // check duplicate for books, this prevents sending the same message multiple times if it touches multiple
-            // books watched by the same connection
-            for (auto const& book : affectedBooks) {
-                bookSignal_.emit(book, allVersionsMsgs);
-            }
+    [[maybe_unused]] auto task = strand_.execute([this,
+                                                  allVersionsMsgs = std::move(allVersionsMsgs),
+                                                  affectedAccounts = std::move(affectedAccounts),
+                                                  affectedBooks = std::move(affectedBooks)]() {
+        notified_.clear();
+        signal_.emit(allVersionsMsgs);
+        // clear the notified set. If the same connection subscribes both transactions + proposed_transactions,
+        // rippled SENDS the same message twice
+        notified_.clear();
+        txProposedSignal_.emit(allVersionsMsgs);
+        notified_.clear();
+        // check duplicate for account and proposed_account, this prevents sending the same message multiple times
+        // if it affects multiple accounts watched by the same connection
+        for (auto const& account : affectedAccounts) {
+            accountSignal_.emit(account, allVersionsMsgs);
+            accountProposedSignal_.emit(account, allVersionsMsgs);
         }
-    );
+        notified_.clear();
+        // check duplicate for books, this prevents sending the same message multiple times if it affects multiple
+        // books watched by the same connection
+        for (auto const& book : affectedBooks) {
+            bookSignal_.emit(book, allVersionsMsgs);
+        }
+    });
 }
 
 void
 TransactionFeed::unsubInternal(SubscriberPtr subscriber)
 {
     if (signal_.disconnect(subscriber)) {
-        LOG(logger_.debug()) << subscriber->tag() << "Unsubscribed transactions";
+        LOG(logger_.info()) << subscriber->tag() << "Unsubscribed transactions";
         --subAllCount_.get();
     }
 }
@@ -287,16 +313,28 @@ void
 TransactionFeed::unsubInternal(ripple::AccountID const& account, SubscriberPtr subscriber)
 {
     if (accountSignal_.disconnect(subscriber, account)) {
-        LOG(logger_.debug()) << subscriber->tag() << "Unsubscribed account " << account;
+        LOG(logger_.info()) << subscriber->tag() << "Unsubscribed account " << account;
         --subAccountCount_.get();
     }
+}
+
+void
+TransactionFeed::unsubProposedInternal(SubscriberPtr subscriber)
+{
+    txProposedSignal_.disconnect(subscriber);
+}
+
+void
+TransactionFeed::unsubProposedInternal(ripple::AccountID const& account, SubscriberPtr subscriber)
+{
+    accountProposedSignal_.disconnect(subscriber, account);
 }
 
 void
 TransactionFeed::unsubInternal(ripple::Book const& book, SubscriberPtr subscriber)
 {
     if (bookSignal_.disconnect(subscriber, book)) {
-        LOG(logger_.debug()) << subscriber->tag() << "Unsubscribed book " << book;
+        LOG(logger_.info()) << subscriber->tag() << "Unsubscribed book " << book;
         --subBookCount_.get();
     }
 }

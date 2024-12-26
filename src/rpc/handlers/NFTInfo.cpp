@@ -23,24 +23,23 @@
 #include "rpc/JS.hpp"
 #include "rpc/RPCHelpers.hpp"
 #include "rpc/common/Types.hpp"
+#include "util/Assert.hpp"
 
 #include <boost/json/conversion.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
 #include <boost/json/value_to.hpp>
-#include <ripple/basics/base_uint.h>
-#include <ripple/basics/strHex.h>
-#include <ripple/protocol/AccountID.h>
-#include <ripple/protocol/ErrorCodes.h>
-#include <ripple/protocol/LedgerHeader.h>
-#include <ripple/protocol/jss.h>
-#include <ripple/protocol/nft.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/basics/strHex.h>
+#include <xrpl/protocol/AccountID.h>
+#include <xrpl/protocol/LedgerHeader.h>
+#include <xrpl/protocol/jss.h>
+#include <xrpl/protocol/nft.h>
 
 #include <string>
 #include <variant>
 
 using namespace ripple;
-using namespace ::rpc;
 
 namespace rpc {
 
@@ -49,7 +48,9 @@ NFTInfoHandler::process(NFTInfoHandler::Input input, Context const& ctx) const
 {
     auto const tokenID = ripple::uint256{input.nftID.c_str()};
     auto const range = sharedPtrBackend_->fetchLedgerRange();
-    auto const lgrInfoOrStatus = getLedgerInfoFromHashOrSeq(
+    ASSERT(range.has_value(), "NFTInfo's ledger range must be available");
+
+    auto const lgrInfoOrStatus = getLedgerHeaderFromHashOrSeq(
         *sharedPtrBackend_, ctx.yield, input.ledgerHash, input.ledgerIndex, range->maxSequence
     );
 
@@ -92,11 +93,11 @@ tag_invoke(boost::json::value_from_tag, boost::json::value& jv, NFTInfoHandler::
         {JS(nft_id), output.nftID},
         {JS(ledger_index), output.ledgerIndex},
         {JS(owner), output.owner},
-        {"is_burned", output.isBurned},
+        {JS(is_burned), output.isBurned},
         {JS(flags), output.flags},
         {"transfer_fee", output.transferFee},
         {JS(issuer), output.issuer},
-        {"nft_taxon", output.taxon},
+        {JS(nft_taxon), output.taxon},
         {JS(nft_serial), output.serial},
         {JS(validated), output.validated},
         {JS(uri), output.uri},

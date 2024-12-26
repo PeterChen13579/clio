@@ -23,6 +23,7 @@
 #include "data/DBHelpers.hpp"
 #include "data/Types.hpp"
 #include "etl/SystemState.hpp"
+#include "feed/SubscriptionManagerInterface.hpp"
 #include "util/Assert.hpp"
 #include "util/log/Logger.hpp"
 #include "util/prometheus/Counter.hpp"
@@ -30,12 +31,12 @@
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/strand.hpp>
-#include <ripple/basics/chrono.h>
-#include <ripple/protocol/Fees.h>
-#include <ripple/protocol/LedgerHeader.h>
-#include <ripple/protocol/SField.h>
-#include <ripple/protocol/STObject.h>
-#include <ripple/protocol/Serializer.h>
+#include <xrpl/basics/chrono.h>
+#include <xrpl/protocol/Fees.h>
+#include <xrpl/protocol/LedgerHeader.h>
+#include <xrpl/protocol/SField.h>
+#include <xrpl/protocol/STObject.h>
+#include <xrpl/protocol/Serializer.h>
 
 #include <chrono>
 #include <cstddef>
@@ -63,7 +64,7 @@ namespace etl::impl {
  * includes reading all of the transactions from the database) is done from the application wide asio io_service, and a
  * strand is used to ensure ledgers are published in order.
  */
-template <typename SubscriptionManagerType, typename CacheType>
+template <typename CacheType>
 class LedgerPublisher {
     util::Logger log_{"ETL"};
 
@@ -71,7 +72,7 @@ class LedgerPublisher {
 
     std::shared_ptr<BackendInterface> backend_;
     std::reference_wrapper<CacheType> cache_;
-    std::shared_ptr<SubscriptionManagerType> subscriptions_;
+    std::shared_ptr<feed::SubscriptionManagerInterface> subscriptions_;
     std::reference_wrapper<SystemState const> state_;  // shared state for ETL
 
     std::chrono::time_point<ripple::NetClock> lastCloseTime_;
@@ -94,7 +95,7 @@ public:
         boost::asio::io_context& ioc,
         std::shared_ptr<BackendInterface> backend,
         CacheType& cache,
-        std::shared_ptr<SubscriptionManagerType> subscriptions,
+        std::shared_ptr<feed::SubscriptionManagerInterface> subscriptions,
         SystemState const& state
     )
         : publishStrand_{boost::asio::make_strand(ioc)}
@@ -110,11 +111,16 @@ public:
      * stream.
      *
      * @param ledgerSequence the sequence of the ledger to publish
-     * @param maxAttempts the number of times to attempt to read the ledger from the database. 1 attempt per second
+     * @param maxAttempts the number of times to attempt to read the ledger from the database
+     * @param attemptsDelay the delay between attempts to read the ledger from the database
      * @return Whether the ledger was found in the database and published
      */
     bool
-    publish(uint32_t ledgerSequence, std::optional<uint32_t> maxAttempts)
+    publish(
+        uint32_t ledgerSequence,
+        std::optional<uint32_t> maxAttempts,
+        std::chrono::steady_clock::duration attemptsDelay = std::chrono::seconds{1}
+    )
     {
         LOG(log_.info()) << "Attempting to publish ledger = " << ledgerSequence;
         size_t numAttempts = 0;
@@ -130,7 +136,7 @@ public:
                     LOG(log_.debug()) << "Failed to publish ledger after " << numAttempts << " attempts.";
                     return false;
                 }
-                std::this_thread::sleep_for(std::chrono::seconds(1));
+                std::this_thread::sleep_for(attemptsDelay);
                 continue;
             }
 
@@ -160,13 +166,16 @@ public:
             LOG(log_.info()) << "Publishing ledger " << std::to_string(lgrInfo.seq);
 
             if (!state_.get().isWriting) {
-                LOG(log_.info()) << "Updating cache";
+                LOG(log_.info()) << "Updating ledger range for read node.";
 
-                std::vector<data::LedgerObject> const diff = data::synchronousAndRetryOnTimeout([&](auto yield) {
-                    return backend_->fetchLedgerDiff(lgrInfo.seq, yield);
-                });
+                if (!cache_.get().isDisabled()) {
+                    std::vector<data::LedgerObject> const diff = data::synchronousAndRetryOnTimeout([&](auto yield) {
+                        return backend_->fetchLedgerDiff(lgrInfo.seq, yield);
+                    });
 
-                cache_.get().update(diff, lgrInfo.seq);
+                    cache_.get().update(diff, lgrInfo.seq);
+                }
+
                 backend_->updateRange(lgrInfo.seq);
             }
 

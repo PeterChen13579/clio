@@ -45,7 +45,6 @@ concept SomeSettingsProvider = requires(T a) {
     { a.getKeyspace() } -> std::same_as<std::string>;
     { a.getTablePrefix() } -> std::same_as<std::optional<std::string>>;
     { a.getReplicationFactor() } -> std::same_as<uint16_t>;
-    { a.getTtl() } -> std::same_as<uint16_t>;
 };
 
 /**

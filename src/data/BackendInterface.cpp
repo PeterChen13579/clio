@@ -24,13 +24,13 @@
 #include "util/log/Logger.hpp"
 
 #include <boost/asio/spawn.hpp>
-#include <ripple/basics/base_uint.h>
-#include <ripple/basics/strHex.h>
-#include <ripple/protocol/Fees.h>
-#include <ripple/protocol/Indexes.h>
-#include <ripple/protocol/SField.h>
-#include <ripple/protocol/STLedgerEntry.h>
-#include <ripple/protocol/Serializer.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/basics/strHex.h>
+#include <xrpl/protocol/Fees.h>
+#include <xrpl/protocol/Indexes.h>
+#include <xrpl/protocol/SField.h>
+#include <xrpl/protocol/STLedgerEntry.h>
+#include <xrpl/protocol/Serializer.h>
 
 #include <chrono>
 #include <cstddef>
@@ -90,10 +90,9 @@ BackendInterface::fetchLedgerObject(
     auto obj = cache_.get(key, sequence);
     if (obj) {
         LOG(gLog.trace()) << "Cache hit - " << ripple::strHex(key);
-        return *obj;
+        return obj;
     }
 
-    LOG(gLog.trace()) << "Cache miss - " << ripple::strHex(key);
     auto dbObj = doFetchLedgerObject(key, sequence, yield);
     if (!dbObj) {
         LOG(gLog.trace()) << "Missed cache and missed in db";
@@ -101,6 +100,19 @@ BackendInterface::fetchLedgerObject(
         LOG(gLog.trace()) << "Missed cache but found in db";
     }
     return dbObj;
+}
+
+std::optional<std::uint32_t>
+BackendInterface::fetchLedgerObjectSeq(
+    ripple::uint256 const& key,
+    std::uint32_t const sequence,
+    boost::asio::yield_context yield
+) const
+{
+    auto seq = doFetchLedgerObjectSeq(key, sequence, yield);
+    if (!seq)
+        LOG(gLog.trace()) << "Missed in db";
+    return seq;
 }
 
 std::vector<Blob>
@@ -164,9 +176,9 @@ BackendInterface::fetchSuccessorObject(
     if (succ) {
         auto obj = fetchLedgerObject(*succ, ledgerSequence, yield);
         if (!obj)
-            return {{*succ, {}}};
+            return {{.key = *succ, .blob = {}}};
 
-        return {{*succ, *obj}};
+        return {{.key = *succ, .blob = *obj}};
     }
     return {};
 }
@@ -271,7 +283,7 @@ BackendInterface::updateRange(uint32_t newMax)
     );
 
     if (!range) {
-        range = {newMax, newMax};
+        range = {.minSequence = newMax, .maxSequence = newMax};
     } else {
         range->maxSequence = newMax;
     }
@@ -287,7 +299,7 @@ BackendInterface::setRange(uint32_t min, uint32_t max, bool force)
         ASSERT(not range.has_value(), "Range was already set");
     }
 
-    range = {min, max};
+    range = {.minSequence = min, .maxSequence = max};
 }
 
 LedgerPage
@@ -297,16 +309,23 @@ BackendInterface::fetchLedgerPage(
     std::uint32_t const limit,
     bool outOfOrder,
     boost::asio::yield_context yield
-) const
+)
 {
     LedgerPage page;
 
     std::vector<ripple::uint256> keys;
     bool reachedEnd = false;
+
     while (keys.size() < limit && !reachedEnd) {
-        ripple::uint256 const& curCursor = !keys.empty() ? keys.back() : (cursor ? *cursor : firstKey);
+        ripple::uint256 const& curCursor = [&]() {
+            if (!keys.empty())
+                return keys.back();
+            return (cursor ? *cursor : firstKey);
+        }();
+
         std::uint32_t const seq = outOfOrder ? range->maxSequence : ledgerSequence;
         auto succ = fetchSuccessorKey(curCursor, seq, yield);
+
         if (!succ) {
             reachedEnd = true;
         } else {
@@ -326,6 +345,9 @@ BackendInterface::fetchLedgerPage(
                 msg << " - " << ripple::strHex(keys[j]);
             }
             LOG(gLog.error()) << msg.str();
+
+            if (corruptionDetector_.has_value())
+                corruptionDetector_->onCorruptionDetected();
         }
     }
     if (!keys.empty() && !reachedEnd)

@@ -20,13 +20,14 @@
 #pragma once
 
 #include "util/Assert.hpp"
-#include "util/Expected.hpp"
 #include "util/async/Concepts.hpp"
 #include "util/async/Error.hpp"
-#include "util/async/impl/Any.hpp"
 
+#include <any>
+#include <expected>
 #include <memory>
 #include <type_traits>
+#include <utility>
 
 namespace util::async::impl {
 
@@ -55,30 +56,19 @@ public:
         pimpl_->wait();
     }
 
-    util::Expected<Any, ExecutionError>
+    std::expected<std::any, ExecutionError>
     get()
     {
         return pimpl_->get();
     }
 
     /**
-     * @brief Request the operation to be stopped as soon as possible
-     * @note ASSERTs if the operation is not stoppable
+     * @brief Cancel if needed and request stop as soon as possible.
      */
     void
-    requestStop()
+    abort()
     {
-        pimpl_->requestStop();
-    }
-
-    /**
-     * @brief Cancel the operation if it is scheduled and not yet started
-     * @note ASSERTs if the operation is not cancellable
-     */
-    void
-    cancel()
-    {
-        pimpl_->cancel();
+        pimpl_->abort();
     }
 
 private:
@@ -87,12 +77,10 @@ private:
 
         virtual void
         wait() noexcept = 0;
-        virtual util::Expected<Any, ExecutionError>
+        virtual std::expected<std::any, ExecutionError>
         get() = 0;
         virtual void
-        requestStop() = 0;
-        virtual void
-        cancel() = 0;
+        abort() = 0;
     };
 
     template <SomeOperation OpType>
@@ -108,33 +96,41 @@ private:
         void
         wait() noexcept override
         {
-            return operation.wait();
+            if constexpr (not SomeAwaitable<OpType>) {
+                ASSERT(false, "Called wait() on an operation that does not support it");
+                std::unreachable();
+            } else {
+                operation.wait();
+            }
         }
 
-        util::Expected<Any, ExecutionError>
+        std::expected<std::any, ExecutionError>
         get() override
         {
-            // Note: return type of the operation was already wrapped to impl::Any by AnyExecutionContext
-            return operation.get();
-        }
-
-        void
-        requestStop() override
-        {
-            if constexpr (SomeStoppableOperation<OpType>) {
-                operation.requestStop();
+            if constexpr (not SomeOperationWithData<OpType>) {
+                ASSERT(false, "Called get() on an operation that does not support it");
+                std::unreachable();
             } else {
-                ASSERT(false, "Stop requested on non-stoppable operation");
+                // Note: return type of the operation was already wrapped to std::any by AnyExecutionContext
+                return operation.get();
             }
         }
 
         void
-        cancel() override
+        abort() override
         {
-            if constexpr (SomeCancellableOperation<OpType>) {
-                operation.cancel();
+            if constexpr (not SomeCancellableOperation<OpType> and not SomeStoppableOperation<OpType> and
+                          not SomeAbortable<OpType>) {
+                ASSERT(false, "Called abort() on an operation that can't be aborted, cancelled nor stopped");
             } else {
-                ASSERT(false, "Cancellation requested on non-cancellable operation");
+                if constexpr (SomeAbortable<OpType>) {
+                    operation.abort();
+                } else {
+                    if constexpr (SomeCancellableOperation<OpType>)
+                        operation.cancel();
+                    if constexpr (SomeStoppableOperation<OpType>)
+                        operation.requestStop();
+                }
             }
         }
     };

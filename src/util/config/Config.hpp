@@ -26,6 +26,7 @@
 #include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -186,7 +187,7 @@ public:
         try {
             return maybeValue<Result>(key).value();
         } catch (std::exception const&) {
-            throw std::runtime_error(err.data());
+            throw std::runtime_error(std::string{err});
         }
     }
 
@@ -348,7 +349,7 @@ public:
         try {
             return maybeValue<Result>().value();
         } catch (std::exception const&) {
-            throw std::runtime_error(err.data());
+            throw std::runtime_error(std::string{err});
         }
     }
 
@@ -361,6 +362,15 @@ public:
      */
     [[nodiscard]] ArrayType
     array() const;
+
+    /**
+     * @brief Method to convert a float seconds value to milliseconds.
+     *
+     * @param value The value to convert
+     * @return The value in milliseconds
+     */
+    static std::chrono::milliseconds
+    toMilliseconds(float value);
 
 private:
     template <typename Return>

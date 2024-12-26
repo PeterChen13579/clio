@@ -2,7 +2,9 @@ add_library(clio_util)
 
 target_sources(
   clio_util
-  PRIVATE config/Config.cpp
+  PRIVATE build/Build.cpp
+          config/Config.cpp
+          CoroutineGroup.cpp
           log/Logger.cpp
           prometheus/Http.cpp
           prometheus/Label.cpp
@@ -13,14 +15,25 @@ target_sources(
           prometheus/Prometheus.cpp
           Random.cpp
           Retry.cpp
+          Repeat.cpp
           requests/RequestBuilder.cpp
           requests/Types.cpp
           requests/WsConnection.cpp
           requests/impl/SslContext.cpp
+          ResponseExpirationCache.cpp
+          SignalsHandler.cpp
           Taggable.cpp
           TerminationHandler.cpp
+          TimeUtils.cpp
           TxUtils.cpp
           LedgerUtils.cpp
+          newconfig/Array.cpp
+          newconfig/ArrayView.cpp
+          newconfig/ConfigConstraints.cpp
+          newconfig/ConfigDefinition.cpp
+          newconfig/ConfigFileJson.cpp
+          newconfig/ObjectView.cpp
+          newconfig/ValueView.cpp
 )
 
 target_link_libraries(
@@ -36,9 +49,7 @@ target_link_libraries(
          clio_options
 )
 
-if (is_gcc)
-  # FIXME: needed on gcc for now
-  #
-  # For some reason cmake doesn't propagate the compile definitions from clio_options so we need to add them here
-  target_compile_definitions(clio_util PUBLIC BOOST_ASIO_DISABLE_CONCEPTS)
-endif ()
+# FIXME: needed on gcc-12, clang-16 and AppleClang for now (known boost 1.82 issue for some compilers)
+#
+# For some reason cmake doesn't propagate the compile definitions from clio_options so we need to add them here
+target_compile_definitions(clio_util PUBLIC BOOST_ASIO_DISABLE_CONCEPTS)

@@ -20,20 +20,20 @@
 #include "data/DBHelpers.hpp"
 
 #include <fmt/core.h>
-#include <ripple/basics/base_uint.h>
-#include <ripple/basics/strHex.h>
-#include <ripple/protocol/AccountID.h>
-#include <ripple/protocol/LedgerFormats.h>
-#include <ripple/protocol/SField.h>
-#include <ripple/protocol/STArray.h>
-#include <ripple/protocol/STBase.h>
-#include <ripple/protocol/STLedgerEntry.h>
-#include <ripple/protocol/STObject.h>
-#include <ripple/protocol/STTx.h>
-#include <ripple/protocol/Serializer.h>
-#include <ripple/protocol/TER.h>
-#include <ripple/protocol/TxFormats.h>
-#include <ripple/protocol/TxMeta.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/basics/strHex.h>
+#include <xrpl/protocol/AccountID.h>
+#include <xrpl/protocol/LedgerFormats.h>
+#include <xrpl/protocol/SField.h>
+#include <xrpl/protocol/STArray.h>
+#include <xrpl/protocol/STBase.h>
+#include <xrpl/protocol/STLedgerEntry.h>
+#include <xrpl/protocol/STObject.h>
+#include <xrpl/protocol/STTx.h>
+#include <xrpl/protocol/Serializer.h>
+#include <xrpl/protocol/TER.h>
+#include <xrpl/protocol/TxFormats.h>
+#include <xrpl/protocol/TxMeta.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -73,9 +73,9 @@ getNFTokenMintData(ripple::TxMeta const& txMeta, ripple::STTx const& sttx)
         if (node.getFName() == ripple::sfCreatedNode) {
             ripple::STArray const& toAddNFTs =
                 node.peekAtField(ripple::sfNewFields).downcast<ripple::STObject>().getFieldArray(ripple::sfNFTokens);
-            std::transform(
-                toAddNFTs.begin(),
-                toAddNFTs.end(),
+            std::ranges::transform(
+                toAddNFTs,
+
                 std::back_inserter(finalIDs),
                 [](ripple::STObject const& nft) { return nft.getFieldH256(ripple::sfNFTokenID); }
             );
@@ -98,29 +98,30 @@ getNFTokenMintData(ripple::TxMeta const& txMeta, ripple::STTx const& sttx)
                 continue;
 
             ripple::STArray const& toAddNFTs = previousFields.getFieldArray(ripple::sfNFTokens);
-            std::transform(
-                toAddNFTs.begin(),
-                toAddNFTs.end(),
+            std::ranges::transform(
+                toAddNFTs,
+
                 std::back_inserter(prevIDs),
                 [](ripple::STObject const& nft) { return nft.getFieldH256(ripple::sfNFTokenID); }
             );
 
             ripple::STArray const& toAddFinalNFTs =
                 node.peekAtField(ripple::sfFinalFields).downcast<ripple::STObject>().getFieldArray(ripple::sfNFTokens);
-            std::transform(
-                toAddFinalNFTs.begin(),
-                toAddFinalNFTs.end(),
+            std::ranges::transform(
+                toAddFinalNFTs,
+
                 std::back_inserter(finalIDs),
                 [](ripple::STObject const& nft) { return nft.getFieldH256(ripple::sfNFTokenID); }
             );
         }
     }
 
-    std::sort(finalIDs.begin(), finalIDs.end());
-    std::sort(prevIDs.begin(), prevIDs.end());
+    std::ranges::sort(finalIDs);
+    std::ranges::sort(prevIDs);
 
     // Find the first NFT ID that doesn't match.  We're looking for an
     // added NFT, so the one we want will be the mismatch in finalIDs.
+    // NOLINTNEXTLINE(modernize-use-ranges)
     auto const diff = std::mismatch(finalIDs.begin(), finalIDs.end(), prevIDs.begin(), prevIDs.end());
 
     // There should always be a difference so the returned finalIDs
@@ -261,7 +262,7 @@ getNFTokenAcceptOfferData(ripple::TxMeta const& txMeta, ripple::STTx const& sttx
                 .getFieldArray(ripple::sfNFTokens);
         }();
 
-        auto const nft = std::find_if(nfts.begin(), nfts.end(), [&tokenID](ripple::STObject const& candidate) {
+        auto const nft = std::ranges::find_if(nfts, [&tokenID](ripple::STObject const& candidate) {
             return candidate.getFieldH256(ripple::sfNFTokenID) == tokenID;
         });
         if (nft != nfts.end()) {
@@ -294,16 +295,14 @@ getNFTokenCancelOfferData(ripple::TxMeta const& txMeta, ripple::STTx const& sttx
         txs.emplace_back(tokenID, txMeta, sttx.getTransactionID());
     }
 
-    // Deduplicate any transactions based on tokenID/txIdx combo. Can't just
-    // use txIdx because in this case one tx can cancel offers for several
-    // NFTs.
-    std::sort(txs.begin(), txs.end(), [](NFTTransactionsData const& a, NFTTransactionsData const& b) {
-        return a.tokenID < b.tokenID && a.transactionIndex < b.transactionIndex;
+    // Deduplicate any transactions based on tokenID
+    std::ranges::sort(txs, [](NFTTransactionsData const& a, NFTTransactionsData const& b) {
+        return a.tokenID < b.tokenID;
     });
-    auto last = std::unique(txs.begin(), txs.end(), [](NFTTransactionsData const& a, NFTTransactionsData const& b) {
-        return a.tokenID == b.tokenID && a.transactionIndex == b.transactionIndex;
+    auto [last, end] = std::ranges::unique(txs, [](NFTTransactionsData const& a, NFTTransactionsData const& b) {
+        return a.tokenID == b.tokenID;
     });
-    txs.erase(last, txs.end());
+    txs.erase(last, end);
     return {txs, {}};
 }
 
@@ -358,4 +357,20 @@ getNFTDataFromObj(std::uint32_t const seq, std::string const& key, std::string c
 
     return nfts;
 }
+
+std::vector<NFTsData>
+getUniqueNFTsDatas(std::vector<NFTsData> const& nfts)
+{
+    std::vector<NFTsData> results = nfts;
+
+    std::ranges::sort(results, [](NFTsData const& a, NFTsData const& b) {
+        return a.tokenID == b.tokenID ? a.transactionIndex > b.transactionIndex : a.tokenID > b.tokenID;
+    });
+
+    auto const [last, end] =
+        std::ranges::unique(results, [](NFTsData const& a, NFTsData const& b) { return a.tokenID == b.tokenID; });
+    results.erase(last, end);
+    return results;
+}
+
 }  // namespace etl

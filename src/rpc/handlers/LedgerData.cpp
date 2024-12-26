@@ -24,6 +24,7 @@
 #include "rpc/JS.hpp"
 #include "rpc/RPCHelpers.hpp"
 #include "rpc/common/Types.hpp"
+#include "util/Assert.hpp"
 #include "util/LedgerUtils.hpp"
 #include "util/log/Logger.hpp"
 
@@ -31,15 +32,14 @@
 #include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
 #include <boost/json/value_to.hpp>
-#include <ripple/basics/base_uint.h>
-#include <ripple/basics/strHex.h>
-#include <ripple/protocol/ErrorCodes.h>
-#include <ripple/protocol/LedgerFormats.h>
-#include <ripple/protocol/LedgerHeader.h>
-#include <ripple/protocol/STLedgerEntry.h>
-#include <ripple/protocol/Serializer.h>
-#include <ripple/protocol/jss.h>
-#include <ripple/protocol/serialize.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/basics/strHex.h>
+#include <xrpl/protocol/LedgerFormats.h>
+#include <xrpl/protocol/LedgerHeader.h>
+#include <xrpl/protocol/STLedgerEntry.h>
+#include <xrpl/protocol/Serializer.h>
+#include <xrpl/protocol/jss.h>
+#include <xrpl/protocol/serialize.h>
 
 #include <algorithm>
 #include <chrono>
@@ -62,7 +62,9 @@ LedgerDataHandler::process(Input input, Context const& ctx) const
         return Error{Status{RippledError::rpcINVALID_PARAMS, "markerNotString"}};
 
     auto const range = sharedPtrBackend_->fetchLedgerRange();
-    auto const lgrInfoOrStatus = getLedgerInfoFromHashOrSeq(
+    ASSERT(range.has_value(), "LedgerData's ledger range must be available");
+
+    auto const lgrInfoOrStatus = getLedgerHeaderFromHashOrSeq(
         *sharedPtrBackend_, ctx.yield, input.ledgerHash, input.ledgerIndex, range->maxSequence
     );
 
@@ -118,7 +120,7 @@ LedgerDataHandler::process(Input input, Context const& ctx) const
         if (page.cursor) {
             output.marker = ripple::strHex(*(page.cursor));
         } else if (input.outOfOrder) {
-            output.diffMarker = sharedPtrBackend_->fetchLedgerRange()->maxSequence;
+            output.diffMarker = range->maxSequence;
         }
     }
 
@@ -196,11 +198,11 @@ tag_invoke(boost::json::value_to_tag<LedgerDataHandler::Input>, boost::json::val
     if (jsonObject.contains("out_of_order"))
         input.outOfOrder = jsonObject.at("out_of_order").as_bool();
 
-    if (jsonObject.contains("marker")) {
-        if (jsonObject.at("marker").is_string()) {
-            input.marker = ripple::uint256{boost::json::value_to<std::string>(jsonObject.at("marker")).data()};
+    if (jsonObject.contains(JS(marker))) {
+        if (jsonObject.at(JS(marker)).is_string()) {
+            input.marker = ripple::uint256{boost::json::value_to<std::string>(jsonObject.at(JS(marker))).data()};
         } else {
-            input.diffMarker = jsonObject.at("marker").as_int64();
+            input.diffMarker = jsonObject.at(JS(marker)).as_int64();
         }
     }
 
@@ -216,7 +218,7 @@ tag_invoke(boost::json::value_to_tag<LedgerDataHandler::Input>, boost::json::val
     }
 
     if (jsonObject.contains(JS(type)))
-        input.type = util::getLedgerEntryTypeFromStr(boost::json::value_to<std::string>(jsonObject.at(JS(type))));
+        input.type = util::LedgerTypes::GetLedgerEntryTypeFromStr(boost::json::value_to<std::string>(jv.at(JS(type))));
 
     return input;
 }

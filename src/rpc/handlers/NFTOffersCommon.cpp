@@ -23,24 +23,24 @@
 #include "rpc/JS.hpp"
 #include "rpc/RPCHelpers.hpp"
 #include "rpc/common/Types.hpp"
+#include "util/Assert.hpp"
 
 #include <boost/asio/spawn.hpp>
 #include <boost/json/conversion.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
 #include <boost/json/value_to.hpp>
-#include <ripple/basics/base_uint.h>
-#include <ripple/protocol/AccountID.h>
-#include <ripple/protocol/ErrorCodes.h>
-#include <ripple/protocol/Indexes.h>
-#include <ripple/protocol/Keylet.h>
-#include <ripple/protocol/LedgerFormats.h>
-#include <ripple/protocol/LedgerHeader.h>
-#include <ripple/protocol/SField.h>
-#include <ripple/protocol/STBase.h>
-#include <ripple/protocol/STLedgerEntry.h>
-#include <ripple/protocol/Serializer.h>
-#include <ripple/protocol/jss.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/protocol/AccountID.h>
+#include <xrpl/protocol/Indexes.h>
+#include <xrpl/protocol/Keylet.h>
+#include <xrpl/protocol/LedgerFormats.h>
+#include <xrpl/protocol/LedgerHeader.h>
+#include <xrpl/protocol/SField.h>
+#include <xrpl/protocol/STBase.h>
+#include <xrpl/protocol/STLedgerEntry.h>
+#include <xrpl/protocol/Serializer.h>
+#include <xrpl/protocol/jss.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -57,7 +57,7 @@ using namespace ::rpc;
 namespace ripple {
 
 // TODO: move to some common serialization impl place
-inline void
+inline static void
 tag_invoke(boost::json::value_from_tag, boost::json::value& jv, SLE const& offer)
 {
     auto amount = ::toBoostJson(offer.getFieldAmount(sfAmount).getJson(JsonOptions::none));
@@ -91,8 +91,11 @@ NFTOffersHandlerBase::iterateOfferDirectory(
 ) const
 {
     auto const range = sharedPtrBackend_->fetchLedgerRange();
-    auto const lgrInfoOrStatus =
-        getLedgerInfoFromHashOrSeq(*sharedPtrBackend_, yield, input.ledgerHash, input.ledgerIndex, range->maxSequence);
+    ASSERT(range.has_value(), "NFTOffersCommon's ledger range must be available");
+
+    auto const lgrInfoOrStatus = getLedgerHeaderFromHashOrSeq(
+        *sharedPtrBackend_, yield, input.ledgerHash, input.ledgerIndex, range->maxSequence
+    );
 
     if (auto const status = std::get_if<Status>(&lgrInfoOrStatus))
         return Error{*status};
@@ -103,7 +106,7 @@ NFTOffersHandlerBase::iterateOfferDirectory(
     if (not sharedPtrBackend_->fetchLedgerObject(directory.key, lgrInfo.seq, yield))
         return Error{Status{RippledError::rpcOBJECT_NOT_FOUND, "notFound"}};
 
-    auto output = Output{input.nftID};
+    auto output = Output{.nftID = input.nftID, .offers = {}, .limit = {}, .marker = {}};
     auto offers = std::vector<ripple::SLE>{};
     auto reserve = input.limit;
     auto cursor = uint256{};
@@ -162,7 +165,7 @@ NFTOffersHandlerBase::iterateOfferDirectory(
         offers.pop_back();
     }
 
-    std::move(std::begin(offers), std::end(offers), std::back_inserter(output.offers));
+    std::ranges::move(offers, std::back_inserter(output.offers));
 
     return output;
 }

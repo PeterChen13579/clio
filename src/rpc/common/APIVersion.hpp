@@ -19,13 +19,11 @@
 
 #pragma once
 
-#include "util/Expected.hpp"
-
 #include <boost/json.hpp>
 #include <boost/json/object.hpp>
 
 #include <cstdint>
-#include <string>
+#include <expected>
 
 namespace rpc {
 
@@ -36,16 +34,13 @@ static constexpr uint32_t API_VERSION_DEFAULT = 1u;
 
 /**
  * @brief Minimum API version supported by this build
- *
- * Note: Clio does not natively support v1 and only supports v2 or newer.
- * However, Clio will forward all v1 requests to rippled for backward compatibility.
  */
 static constexpr uint32_t API_VERSION_MIN = 1u;
 
 /**
  * @brief Maximum API version supported by this build
  */
-static constexpr uint32_t API_VERSION_MAX = 2u;
+static constexpr uint32_t API_VERSION_MAX = 3u;
 
 /**
  * @brief A baseclass for API version helper
@@ -60,7 +55,7 @@ public:
      * @param request A JSON object representing the request
      * @return The specified API version if contained in the JSON object; error string otherwise
      */
-    util::Expected<uint32_t, std::string> virtual parse(boost::json::object const& request) const = 0;
+    std::expected<uint32_t, std::string> virtual parse(boost::json::object const& request) const = 0;
 };
 
 }  // namespace rpc

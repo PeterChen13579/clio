@@ -20,24 +20,32 @@
 #include "etl/LoadBalancer.hpp"
 
 #include "data/BackendInterface.hpp"
-#include "etl/ETLHelpers.hpp"
-#include "etl/ETLService.hpp"
 #include "etl/ETLState.hpp"
+#include "etl/NetworkValidatedLedgersInterface.hpp"
 #include "etl/Source.hpp"
+#include "feed/SubscriptionManagerInterface.hpp"
+#include "rpc/Errors.hpp"
+#include "util/Assert.hpp"
 #include "util/Random.hpp"
+#include "util/ResponseExpirationCache.hpp"
 #include "util/log/Logger.hpp"
+#include "util/newconfig/ArrayView.hpp"
+#include "util/newconfig/ConfigDefinition.hpp"
+#include "util/newconfig/ObjectView.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/spawn.hpp>
 #include <boost/json/array.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
+#include <boost/json/value_to.hpp>
 #include <fmt/core.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -46,45 +54,51 @@
 #include <utility>
 #include <vector>
 
-using namespace util;
+using namespace util::config;
 
 namespace etl {
 
 std::shared_ptr<LoadBalancer>
 LoadBalancer::make_LoadBalancer(
-    Config const& config,
+    ClioConfigDefinition const& config,
     boost::asio::io_context& ioc,
     std::shared_ptr<BackendInterface> backend,
-    std::shared_ptr<feed::SubscriptionManager> subscriptions,
-    std::shared_ptr<NetworkValidatedLedgers> validatedLedgers
+    std::shared_ptr<feed::SubscriptionManagerInterface> subscriptions,
+    std::shared_ptr<NetworkValidatedLedgersInterface> validatedLedgers,
+    SourceFactory sourceFactory
 )
 {
-    return std::make_shared<LoadBalancer>(config, ioc, backend, subscriptions, validatedLedgers);
+    return std::make_shared<LoadBalancer>(
+        config, ioc, std::move(backend), std::move(subscriptions), std::move(validatedLedgers), std::move(sourceFactory)
+    );
 }
 
 LoadBalancer::LoadBalancer(
-    Config const& config,
+    ClioConfigDefinition const& config,
     boost::asio::io_context& ioc,
     std::shared_ptr<BackendInterface> backend,
-    std::shared_ptr<feed::SubscriptionManager> subscriptions,
-    std::shared_ptr<NetworkValidatedLedgers> validatedLedgers
+    std::shared_ptr<feed::SubscriptionManagerInterface> subscriptions,
+    std::shared_ptr<NetworkValidatedLedgersInterface> validatedLedgers,
+    SourceFactory sourceFactory
 )
 {
-    auto const forwardingCacheTimeout = config.valueOr<float>("forwarding_cache_timeout", 0.f);
+    auto const forwardingCacheTimeout = config.get<float>("forwarding.cache_timeout");
     if (forwardingCacheTimeout > 0.f) {
-        forwardingCache_ = impl::ForwardingCache{
-            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::duration<float>{forwardingCacheTimeout})
+        forwardingCache_ = util::ResponseExpirationCache{
+            util::config::ClioConfigDefinition::toMilliseconds(forwardingCacheTimeout),
+            {"server_info", "server_state", "server_definitions", "fee", "ledger_closed"}
         };
     }
 
-    static constexpr std::uint32_t MAX_DOWNLOAD = 256;
-    if (auto value = config.maybeValue<uint32_t>("num_markers"); value) {
-        downloadRanges_ = std::clamp(*value, 1u, MAX_DOWNLOAD);
+    auto const numMarkers = config.getValueView("num_markers");
+    if (numMarkers.hasValue()) {
+        auto const value = numMarkers.asIntType<uint32_t>();
+        downloadRanges_ = value;
     } else if (backend->fetchLedgerRange()) {
         downloadRanges_ = 4;
     }
 
-    auto const allowNoEtl = config.valueOr("allow_no_etl", false);
+    auto const allowNoEtl = config.get<bool>("allow_no_etl");
 
     auto const checkOnETLFailure = [this, allowNoEtl](std::string const& log) {
         LOG(log_.warn()) << log;
@@ -95,29 +109,37 @@ LoadBalancer::LoadBalancer(
         }
     };
 
-    for (auto const& entry : config.array("etl_sources")) {
-        auto source = make_Source(
-            entry,
+    auto const forwardingTimeout =
+        ClioConfigDefinition::toMilliseconds(config.get<float>("forwarding.request_timeout"));
+    auto const etlArray = config.getArray("etl_sources");
+    for (auto it = etlArray.begin<ObjectView>(); it != etlArray.end<ObjectView>(); ++it) {
+        auto source = sourceFactory(
+            *it,
             ioc,
             backend,
             subscriptions,
             validatedLedgers,
+            forwardingTimeout,
             [this]() {
-                if (not hasForwardingSource_)
+                if (not hasForwardingSource_.lock().get())
                     chooseForwardingSource();
             },
-            [this]() { chooseForwardingSource(); },
-            [this]() { forwardingCache_->invalidate(); }
+            [this](bool wasForwarding) {
+                if (wasForwarding)
+                    chooseForwardingSource();
+            },
+            [this]() {
+                if (forwardingCache_.has_value())
+                    forwardingCache_->invalidate();
+            }
         );
 
         // checking etl node validity
-        auto const stateOpt = ETLState::fetchETLStateFromSource(source);
+        auto const stateOpt = ETLState::fetchETLStateFromSource(*source);
 
         if (!stateOpt) {
-            checkOnETLFailure(fmt::format(
-                "Failed to fetch ETL state from source = {} Please check the configuration and network",
-                source.toString()
-            ));
+            LOG(log_.warn()) << "Failed to fetch ETL state from source = " << source->toString()
+                             << " Please check the configuration and network";
         } else if (etlState_ && etlState_->networkID && stateOpt->networkID &&
                    etlState_->networkID != stateOpt->networkID) {
             checkOnETLFailure(fmt::format(
@@ -130,16 +152,19 @@ LoadBalancer::LoadBalancer(
         }
 
         sources_.push_back(std::move(source));
-        LOG(log_.info()) << "Added etl source - " << sources_.back().toString();
+        LOG(log_.info()) << "Added etl source - " << sources_.back()->toString();
     }
+
+    if (!etlState_)
+        checkOnETLFailure("Failed to fetch ETL state from any source. Please check the configuration and network");
 
     if (sources_.empty())
         checkOnETLFailure("No ETL sources configured. Please check the configuration");
 
     // This is made separate from source creation to prevent UB in case one of the sources will call
     // chooseForwardingSource while we are still filling the sources_ vector
-    for (auto& source : sources_) {
-        source.run();
+    for (auto const& source : sources_) {
+        source->run();
     }
 }
 
@@ -148,89 +173,105 @@ LoadBalancer::~LoadBalancer()
     sources_.clear();
 }
 
-std::pair<std::vector<std::string>, bool>
-LoadBalancer::loadInitialLedger(uint32_t sequence, bool cacheOnly)
+std::vector<std::string>
+LoadBalancer::loadInitialLedger(uint32_t sequence, bool cacheOnly, std::chrono::steady_clock::duration retryAfter)
 {
     std::vector<std::string> response;
-    auto const success = execute(
+    execute(
         [this, &response, &sequence, cacheOnly](auto& source) {
-            auto [data, res] = source.loadInitialLedger(sequence, downloadRanges_, cacheOnly);
+            auto [data, res] = source->loadInitialLedger(sequence, downloadRanges_, cacheOnly);
 
             if (!res) {
                 LOG(log_.error()) << "Failed to download initial ledger."
-                                  << " Sequence = " << sequence << " source = " << source.toString();
+                                  << " Sequence = " << sequence << " source = " << source->toString();
             } else {
                 response = std::move(data);
             }
 
             return res;
         },
-        sequence
+        sequence,
+        retryAfter
     );
-    return {std::move(response), success};
+    return response;
 }
 
 LoadBalancer::OptionalGetLedgerResponseType
-LoadBalancer::fetchLedger(uint32_t ledgerSequence, bool getObjects, bool getObjectNeighbors)
+LoadBalancer::fetchLedger(
+    uint32_t ledgerSequence,
+    bool getObjects,
+    bool getObjectNeighbors,
+    std::chrono::steady_clock::duration retryAfter
+)
 {
     GetLedgerResponseType response;
-    bool const success = execute(
+    execute(
         [&response, ledgerSequence, getObjects, getObjectNeighbors, log = log_](auto& source) {
-            auto [status, data] = source.fetchLedger(ledgerSequence, getObjects, getObjectNeighbors);
+            auto [status, data] = source->fetchLedger(ledgerSequence, getObjects, getObjectNeighbors);
             response = std::move(data);
             if (status.ok() && response.validated()) {
                 LOG(log.info()) << "Successfully fetched ledger = " << ledgerSequence
-                                << " from source = " << source.toString();
+                                << " from source = " << source->toString();
                 return true;
             }
 
             LOG(log.warn()) << "Could not fetch ledger " << ledgerSequence << ", Reply: " << response.DebugString()
                             << ", error_code: " << status.error_code() << ", error_msg: " << status.error_message()
-                            << ", source = " << source.toString();
+                            << ", source = " << source->toString();
             return false;
         },
-        ledgerSequence
+        ledgerSequence,
+        retryAfter
     );
-    if (success) {
-        return response;
-    }
-    return {};
+    return response;
 }
 
-std::optional<boost::json::object>
+std::expected<boost::json::object, rpc::ClioError>
 LoadBalancer::forwardToRippled(
     boost::json::object const& request,
     std::optional<std::string> const& clientIp,
+    bool isAdmin,
     boost::asio::yield_context yield
 )
 {
+    if (not request.contains("command"))
+        return std::unexpected{rpc::ClioError::rpcCOMMAND_IS_MISSING};
+
+    auto const cmd = boost::json::value_to<std::string>(request.at("command"));
     if (forwardingCache_) {
-        if (auto cachedResponse = forwardingCache_->get(request); cachedResponse) {
-            return cachedResponse;
+        if (auto cachedResponse = forwardingCache_->get(cmd); cachedResponse) {
+            return std::move(cachedResponse).value();
         }
     }
 
-    std::size_t sourceIdx = 0;
-    if (!sources_.empty())
-        sourceIdx = util::Random::uniform(0ul, sources_.size() - 1);
+    ASSERT(not sources_.empty(), "ETL sources must be configured to forward requests.");
+    std::size_t sourceIdx = util::Random::uniform(0ul, sources_.size() - 1);
 
     auto numAttempts = 0u;
 
+    auto xUserValue = isAdmin ? ADMIN_FORWARDING_X_USER_VALUE : USER_FORWARDING_X_USER_VALUE;
+
     std::optional<boost::json::object> response;
+    rpc::ClioError error = rpc::ClioError::etlCONNECTION_ERROR;
     while (numAttempts < sources_.size()) {
-        if (auto res = sources_[sourceIdx].forwardToRippled(request, clientIp, yield)) {
-            response = std::move(res);
+        auto res = sources_[sourceIdx]->forwardToRippled(request, clientIp, xUserValue, yield);
+        if (res) {
+            response = std::move(res).value();
             break;
         }
+        error = std::max(error, res.error());  // Choose the best result between all sources
 
         sourceIdx = (sourceIdx + 1) % sources_.size();
         ++numAttempts;
     }
 
-    if (response and forwardingCache_ and not response->contains("error"))
-        forwardingCache_->put(request, *response);
+    if (response) {
+        if (forwardingCache_ and not response->contains("error"))
+            forwardingCache_->put(cmd, *response);
+        return std::move(response).value();
+    }
 
-    return response;
+    return std::unexpected{error};
 }
 
 boost::json::value
@@ -238,54 +279,51 @@ LoadBalancer::toJson() const
 {
     boost::json::array ret;
     for (auto& src : sources_)
-        ret.push_back(src.toJson());
+        ret.push_back(src->toJson());
 
     return ret;
 }
 
 template <typename Func>
-bool
-LoadBalancer::execute(Func f, uint32_t ledgerSequence)
+void
+LoadBalancer::execute(Func f, uint32_t ledgerSequence, std::chrono::steady_clock::duration retryAfter)
 {
-    std::size_t sourceIdx = 0;
-    if (!sources_.empty())
-        sourceIdx = util::Random::uniform(0ul, sources_.size() - 1);
+    ASSERT(not sources_.empty(), "ETL sources must be configured to execute functions.");
+    size_t sourceIdx = util::Random::uniform(0ul, sources_.size() - 1);
 
-    auto numAttempts = 0;
+    size_t numAttempts = 0;
 
     while (true) {
         auto& source = sources_[sourceIdx];
 
         LOG(log_.debug()) << "Attempting to execute func. ledger sequence = " << ledgerSequence
-                          << " - source = " << source.toString();
+                          << " - source = " << source->toString();
         // Originally, it was (source->hasLedger(ledgerSequence) || true)
         /* Sometimes rippled has ledger but doesn't actually know. However,
         but this does NOT happen in the normal case and is safe to remove
         This || true is only needed when loading full history standalone */
-        if (source.hasLedger(ledgerSequence)) {
+        if (source->hasLedger(ledgerSequence)) {
             bool const res = f(source);
             if (res) {
-                LOG(log_.debug()) << "Successfully executed func at source = " << source.toString()
+                LOG(log_.debug()) << "Successfully executed func at source = " << source->toString()
                                   << " - ledger sequence = " << ledgerSequence;
                 break;
             }
 
-            LOG(log_.warn()) << "Failed to execute func at source = " << source.toString()
+            LOG(log_.warn()) << "Failed to execute func at source = " << source->toString()
                              << " - ledger sequence = " << ledgerSequence;
         } else {
-            LOG(log_.warn()) << "Ledger not present at source = " << source.toString()
+            LOG(log_.warn()) << "Ledger not present at source = " << source->toString()
                              << " - ledger sequence = " << ledgerSequence;
         }
         sourceIdx = (sourceIdx + 1) % sources_.size();
         numAttempts++;
         if (numAttempts % sources_.size() == 0) {
             LOG(log_.info()) << "Ledger sequence " << ledgerSequence
-                             << " is not yet available from any configured sources. "
-                             << "Sleeping and trying again";
-            std::this_thread::sleep_for(std::chrono::seconds(2));
+                             << " is not yet available from any configured sources. Sleeping and trying again";
+            std::this_thread::sleep_for(retryAfter);
         }
     }
-    return true;
 }
 
 std::optional<ETLState>
@@ -301,12 +339,15 @@ LoadBalancer::getETLState() noexcept
 void
 LoadBalancer::chooseForwardingSource()
 {
-    hasForwardingSource_ = false;
+    LOG(log_.info()) << "Choosing a new source to forward subscriptions";
+    auto hasForwardingSourceLock = hasForwardingSource_.lock();
+    hasForwardingSourceLock.get() = false;
     for (auto& source : sources_) {
-        if (source.isConnected()) {
-            source.setForwarding(true);
-            hasForwardingSource_ = true;
-            return;
+        if (not hasForwardingSourceLock.get() and source->isConnected()) {
+            source->setForwarding(true);
+            hasForwardingSourceLock.get() = true;
+        } else {
+            source->setForwarding(false);
         }
     }
 }

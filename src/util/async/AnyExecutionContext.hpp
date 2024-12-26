@@ -23,7 +23,6 @@
 #include "util/async/AnyStopToken.hpp"
 #include "util/async/AnyStrand.hpp"
 #include "util/async/Concepts.hpp"
-#include "util/async/impl/Any.hpp"
 #include "util/async/impl/ErasedOperation.hpp"
 
 #include <any>
@@ -44,16 +43,37 @@ public:
     /**
      * @brief Construct a new type-erased Execution Context object
      *
+     * @note Stores the Execution Context by reference.
+     *
      * @tparam CtxType The type of the execution context to wrap
      * @param ctx The execution context to wrap
      */
-    template <typename CtxType>
-        requires(not std::is_same_v<std::decay_t<CtxType>, AnyExecutionContext>)
+    template <NotSameAs<AnyExecutionContext> CtxType>
     /* implicit */
-    AnyExecutionContext(CtxType&& ctx) : pimpl_{std::make_unique<Model<CtxType>>(std::forward<CtxType>(ctx))}
+    AnyExecutionContext(CtxType& ctx) : pimpl_{std::make_shared<Model<CtxType&>>(ctx)}
     {
     }
 
+    /**
+     * @brief Construct a new type-erased Execution Context object
+     *
+     * @note Stores the Execution Context by moving it into the AnyExecutionContext.
+     *
+     * @tparam CtxType The type of the execution context to wrap
+     * @param ctx The execution context to wrap
+     */
+    template <RValueNotSameAs<AnyExecutionContext> CtxType>
+    /* implicit */
+    AnyExecutionContext(CtxType&& ctx) : pimpl_{std::make_shared<Model<CtxType>>(std::forward<CtxType>(ctx))}
+    {
+    }
+
+    AnyExecutionContext(AnyExecutionContext const&) = default;
+    AnyExecutionContext(AnyExecutionContext&&) = default;
+    AnyExecutionContext&
+    operator=(AnyExecutionContext const&) = default;
+    AnyExecutionContext&
+    operator=(AnyExecutionContext&&) = default;
     ~AnyExecutionContext() = default;
 
     /**
@@ -66,9 +86,9 @@ public:
     execute(SomeHandlerWithoutStopToken auto&& fn)
     {
         using RetType = std::decay_t<decltype(fn())>;
-        static_assert(not std::is_same_v<RetType, impl::Any>);
+        static_assert(not std::is_same_v<RetType, std::any>);
 
-        return AnyOperation<RetType>(pimpl_->execute([fn = std::forward<decltype(fn)>(fn)]() -> impl::Any {
+        return AnyOperation<RetType>(pimpl_->execute([fn = std::forward<decltype(fn)>(fn)]() -> std::any {
             if constexpr (std::is_void_v<RetType>) {
                 fn();
                 return {};
@@ -90,18 +110,16 @@ public:
     execute(SomeHandlerWith<AnyStopToken> auto&& fn)
     {
         using RetType = std::decay_t<decltype(fn(std::declval<AnyStopToken>()))>;
-        static_assert(not std::is_same_v<RetType, impl::Any>);
+        static_assert(not std::is_same_v<RetType, std::any>);
 
-        return AnyOperation<RetType>(
-            pimpl_->execute([fn = std::forward<decltype(fn)>(fn)](auto stopToken) -> impl::Any {
-                if constexpr (std::is_void_v<RetType>) {
-                    fn(std::move(stopToken));
-                    return {};
-                } else {
-                    return std::make_any<RetType>(fn(std::move(stopToken)));
-                }
-            })
-        );
+        return AnyOperation<RetType>(pimpl_->execute([fn = std::forward<decltype(fn)>(fn)](auto stopToken) -> std::any {
+            if constexpr (std::is_void_v<RetType>) {
+                fn(std::move(stopToken));
+                return {};
+            } else {
+                return std::make_any<RetType>(fn(std::move(stopToken)));
+            }
+        }));
     }
 
     /**
@@ -117,10 +135,10 @@ public:
     execute(SomeHandlerWith<AnyStopToken> auto&& fn, SomeStdDuration auto timeout)
     {
         using RetType = std::decay_t<decltype(fn(std::declval<AnyStopToken>()))>;
-        static_assert(not std::is_same_v<RetType, impl::Any>);
+        static_assert(not std::is_same_v<RetType, std::any>);
 
         return AnyOperation<RetType>(pimpl_->execute(
-            [fn = std::forward<decltype(fn)>(fn)](auto stopToken) -> impl::Any {
+            [fn = std::forward<decltype(fn)>(fn)](auto stopToken) -> std::any {
                 if constexpr (std::is_void_v<RetType>) {
                     fn(std::move(stopToken));
                     return {};
@@ -145,12 +163,12 @@ public:
     scheduleAfter(SomeStdDuration auto delay, SomeHandlerWith<AnyStopToken> auto&& fn)
     {
         using RetType = std::decay_t<decltype(fn(std::declval<AnyStopToken>()))>;
-        static_assert(not std::is_same_v<RetType, impl::Any>);
+        static_assert(not std::is_same_v<RetType, std::any>);
 
-        auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(delay);
+        auto const millis = std::chrono::duration_cast<std::chrono::milliseconds>(delay);
         return AnyOperation<RetType>(pimpl_->scheduleAfter(
             millis,
-            [fn = std::forward<decltype(fn)>(fn)](auto stopToken) -> impl::Any {
+            [fn = std::forward<decltype(fn)>(fn)](auto stopToken) -> std::any {
                 if constexpr (std::is_void_v<RetType>) {
                     fn(std::move(stopToken));
                     return {};
@@ -175,12 +193,12 @@ public:
     scheduleAfter(SomeStdDuration auto delay, SomeHandlerWith<AnyStopToken, bool> auto&& fn)
     {
         using RetType = std::decay_t<decltype(fn(std::declval<AnyStopToken>(), true))>;
-        static_assert(not std::is_same_v<RetType, impl::Any>);
+        static_assert(not std::is_same_v<RetType, std::any>);
 
-        auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(delay);
+        auto const millis = std::chrono::duration_cast<std::chrono::milliseconds>(delay);
         return AnyOperation<RetType>(pimpl_->scheduleAfter(
             millis,
-            [fn = std::forward<decltype(fn)>(fn)](auto stopToken, auto cancelled) -> impl::Any {
+            [fn = std::forward<decltype(fn)>(fn)](auto stopToken, auto cancelled) -> std::any {
                 if constexpr (std::is_void_v<RetType>) {
                     fn(std::move(stopToken), cancelled);
                     return {};
@@ -189,6 +207,31 @@ public:
                 }
             }
         ));
+    }
+
+    /**
+     * @brief Schedule a repeating operation on the execution context
+     *
+     * @param interval The interval at which the operation should be repeated
+     * @param fn The block of code to execute; no args allowed and return type must be void
+     * @return A repeating stoppable operation that can be used to wait for its cancellation
+     */
+    [[nodiscard]] auto
+    executeRepeatedly(SomeStdDuration auto interval, SomeHandlerWithoutStopToken auto&& fn)
+    {
+        using RetType = std::decay_t<decltype(fn())>;
+        static_assert(not std::is_same_v<RetType, std::any>);
+
+        auto const millis = std::chrono::duration_cast<std::chrono::milliseconds>(interval);
+        return AnyOperation<RetType>(  //
+            pimpl_->executeRepeatedly(
+                millis,
+                [fn = std::forward<decltype(fn)>(fn)] -> std::any {
+                    fn();
+                    return {};
+                }
+            )
+        );
     }
 
     /**
@@ -205,65 +248,107 @@ public:
         return pimpl_->makeStrand();
     }
 
+    /**
+     * @brief Stop the execution context
+     */
+    void
+    stop() const
+    {
+        pimpl_->stop();
+    }
+
+    /**
+     * @brief Join the execution context
+     */
+    void
+    join() const
+    {
+        pimpl_->join();
+    }
+
 private:
     struct Concept {
         virtual ~Concept() = default;
 
         virtual impl::ErasedOperation
         execute(
-            std::function<impl::Any(AnyStopToken)>,
+            std::function<std::any(AnyStopToken)>,
             std::optional<std::chrono::milliseconds> timeout = std::nullopt
         ) = 0;
-        virtual impl::ErasedOperation execute(std::function<impl::Any()>) = 0;
+        virtual impl::ErasedOperation execute(std::function<std::any()>) = 0;
         virtual impl::ErasedOperation
-            scheduleAfter(std::chrono::milliseconds, std::function<impl::Any(AnyStopToken)>) = 0;
+            scheduleAfter(std::chrono::milliseconds, std::function<std::any(AnyStopToken)>) = 0;
         virtual impl::ErasedOperation
-            scheduleAfter(std::chrono::milliseconds, std::function<impl::Any(AnyStopToken, bool)>) = 0;
+            scheduleAfter(std::chrono::milliseconds, std::function<std::any(AnyStopToken, bool)>) = 0;
+        virtual impl::ErasedOperation executeRepeatedly(std::chrono::milliseconds, std::function<std::any()>) = 0;
         virtual AnyStrand
         makeStrand() = 0;
+        virtual void
+        stop() const = 0;
+        virtual void
+        join() const = 0;
     };
 
     template <typename CtxType>
     struct Model : Concept {
-        std::reference_wrapper<std::decay_t<CtxType>> ctx;
+        CtxType ctx;
 
-        Model(CtxType& ctx) : ctx{std::ref(ctx)}
+        template <typename Type>
+        Model(Type&& ctx) : ctx(std::forward<Type>(ctx))
         {
         }
 
         impl::ErasedOperation
-        execute(std::function<impl::Any(AnyStopToken)> fn, std::optional<std::chrono::milliseconds> timeout) override
+        execute(std::function<std::any(AnyStopToken)> fn, std::optional<std::chrono::milliseconds> timeout) override
         {
-            return ctx.get().execute(std::move(fn), timeout);
+            return ctx.execute(std::move(fn), timeout);
         }
 
         impl::ErasedOperation
-        execute(std::function<impl::Any()> fn) override
+        execute(std::function<std::any()> fn) override
         {
-            return ctx.get().execute(std::move(fn));
+            return ctx.execute(std::move(fn));
         }
 
         impl::ErasedOperation
-        scheduleAfter(std::chrono::milliseconds delay, std::function<impl::Any(AnyStopToken)> fn) override
+        scheduleAfter(std::chrono::milliseconds delay, std::function<std::any(AnyStopToken)> fn) override
         {
-            return ctx.get().scheduleAfter(delay, std::move(fn));
+            return ctx.scheduleAfter(delay, std::move(fn));
         }
 
         impl::ErasedOperation
-        scheduleAfter(std::chrono::milliseconds delay, std::function<impl::Any(AnyStopToken, bool)> fn) override
+        scheduleAfter(std::chrono::milliseconds delay, std::function<std::any(AnyStopToken, bool)> fn) override
         {
-            return ctx.get().scheduleAfter(delay, std::move(fn));
+            return ctx.scheduleAfter(delay, std::move(fn));
+        }
+
+        impl::ErasedOperation
+        executeRepeatedly(std::chrono::milliseconds interval, std::function<std::any()> fn) override
+        {
+            return ctx.executeRepeatedly(interval, std::move(fn));
         }
 
         AnyStrand
         makeStrand() override
         {
-            return ctx.get().makeStrand();
+            return ctx.makeStrand();
+        }
+
+        void
+        stop() const override
+        {
+            ctx.stop();
+        }
+
+        void
+        join() const override
+        {
+            ctx.join();
         }
     };
 
 private:
-    std::unique_ptr<Concept> pimpl_;
+    std::shared_ptr<Concept> pimpl_;
 };
 
 }  // namespace util::async

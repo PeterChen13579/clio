@@ -19,31 +19,34 @@
 
 #include "rpc/handlers/LedgerEntry.hpp"
 
+#include "rpc/CredentialHelpers.hpp"
 #include "rpc/Errors.hpp"
 #include "rpc/JS.hpp"
 #include "rpc/RPCHelpers.hpp"
 #include "rpc/common/Types.hpp"
+#include "util/AccountUtils.hpp"
+#include "util/Assert.hpp"
 
 #include <boost/json/conversion.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
 #include <boost/json/value_to.hpp>
-#include <ripple/basics/base_uint.h>
-#include <ripple/basics/strHex.h>
-#include <ripple/json/json_value.h>
-#include <ripple/protocol/AccountID.h>
-#include <ripple/protocol/ErrorCodes.h>
-#include <ripple/protocol/Indexes.h>
-#include <ripple/protocol/Issue.h>
-#include <ripple/protocol/LedgerFormats.h>
-#include <ripple/protocol/LedgerHeader.h>
-#include <ripple/protocol/SField.h>
-#include <ripple/protocol/STLedgerEntry.h>
-#include <ripple/protocol/STXChainBridge.h>
-#include <ripple/protocol/Serializer.h>
-#include <ripple/protocol/UintTypes.h>
-#include <ripple/protocol/jss.h>
-#include <ripple/protocol/tokens.h>
+#include <xrpl/basics/Slice.h>
+#include <xrpl/basics/StringUtilities.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/basics/strHex.h>
+#include <xrpl/json/json_value.h>
+#include <xrpl/protocol/AccountID.h>
+#include <xrpl/protocol/Indexes.h>
+#include <xrpl/protocol/Issue.h>
+#include <xrpl/protocol/LedgerFormats.h>
+#include <xrpl/protocol/LedgerHeader.h>
+#include <xrpl/protocol/SField.h>
+#include <xrpl/protocol/STLedgerEntry.h>
+#include <xrpl/protocol/STXChainBridge.h>
+#include <xrpl/protocol/Serializer.h>
+#include <xrpl/protocol/UintTypes.h>
+#include <xrpl/protocol/jss.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -63,9 +66,9 @@ LedgerEntryHandler::process(LedgerEntryHandler::Input input, Context const& ctx)
     if (input.index) {
         key = ripple::uint256{std::string_view(*(input.index))};
     } else if (input.accountRoot) {
-        key = ripple::keylet::account(*ripple::parseBase58<ripple::AccountID>(*(input.accountRoot))).key;
+        key = ripple::keylet::account(*util::parseBase58Wrapper<ripple::AccountID>(*(input.accountRoot))).key;
     } else if (input.did) {
-        key = ripple::keylet::did(*ripple::parseBase58<ripple::AccountID>(*(input.did))).key;
+        key = ripple::keylet::did(*util::parseBase58Wrapper<ripple::AccountID>(*(input.did))).key;
     } else if (input.directory) {
         auto const keyOrStatus = composeKeyFromDirectory(*input.directory);
         if (auto const status = std::get_if<Status>(&keyOrStatus))
@@ -74,13 +77,14 @@ LedgerEntryHandler::process(LedgerEntryHandler::Input input, Context const& ctx)
         key = std::get<ripple::uint256>(keyOrStatus);
     } else if (input.offer) {
         auto const id =
-            ripple::parseBase58<ripple::AccountID>(boost::json::value_to<std::string>(input.offer->at(JS(account))));
+            util::parseBase58Wrapper<ripple::AccountID>(boost::json::value_to<std::string>(input.offer->at(JS(account)))
+            );
         key = ripple::keylet::offer(*id, boost::json::value_to<std::uint32_t>(input.offer->at(JS(seq)))).key;
     } else if (input.rippleStateAccount) {
-        auto const id1 = ripple::parseBase58<ripple::AccountID>(
+        auto const id1 = util::parseBase58Wrapper<ripple::AccountID>(
             boost::json::value_to<std::string>(input.rippleStateAccount->at(JS(accounts)).as_array().at(0))
         );
-        auto const id2 = ripple::parseBase58<ripple::AccountID>(
+        auto const id2 = util::parseBase58Wrapper<ripple::AccountID>(
             boost::json::value_to<std::string>(input.rippleStateAccount->at(JS(accounts)).as_array().at(1))
         );
         auto const currency =
@@ -89,20 +93,41 @@ LedgerEntryHandler::process(LedgerEntryHandler::Input input, Context const& ctx)
         key = ripple::keylet::line(*id1, *id2, currency).key;
     } else if (input.escrow) {
         auto const id =
-            ripple::parseBase58<ripple::AccountID>(boost::json::value_to<std::string>(input.escrow->at(JS(owner))));
+            util::parseBase58Wrapper<ripple::AccountID>(boost::json::value_to<std::string>(input.escrow->at(JS(owner)))
+            );
         key = ripple::keylet::escrow(*id, input.escrow->at(JS(seq)).as_int64()).key;
     } else if (input.depositPreauth) {
-        auto const owner = ripple::parseBase58<ripple::AccountID>(
+        auto const owner = util::parseBase58Wrapper<ripple::AccountID>(
             boost::json::value_to<std::string>(input.depositPreauth->at(JS(owner)))
         );
-        auto const authorized = ripple::parseBase58<ripple::AccountID>(
-            boost::json::value_to<std::string>(input.depositPreauth->at(JS(authorized)))
-        );
+        // Only one of authorize or authorized_credentials MUST exist;
+        if (input.depositPreauth->contains(JS(authorized)) ==
+            input.depositPreauth->contains(JS(authorized_credentials))) {
+            return Error{
+                Status{ClioError::rpcMALFORMED_REQUEST, "Must have one of authorized or authorized_credentials."}
+            };
+        }
 
-        key = ripple::keylet::depositPreauth(*owner, *authorized).key;
+        if (input.depositPreauth->contains(JS(authorized))) {
+            auto const authorized = util::parseBase58Wrapper<ripple::AccountID>(
+                boost::json::value_to<std::string>(input.depositPreauth->at(JS(authorized)))
+            );
+            key = ripple::keylet::depositPreauth(*owner, *authorized).key;
+        } else {
+            auto const authorizedCredentials = rpc::credentials::parseAuthorizeCredentials(
+                input.depositPreauth->at(JS(authorized_credentials)).as_array()
+            );
+
+            auto const authCreds = credentials::createAuthCredentials(authorizedCredentials);
+            if (authCreds.size() != authorizedCredentials.size())
+                return Error{Status{ClioError::rpcMALFORMED_AUTHORIZED_CREDENTIALS, "duplicates in credentials."}};
+
+            key = ripple::keylet::depositPreauth(owner.value(), authCreds).key;
+        }
     } else if (input.ticket) {
         auto const id =
-            ripple::parseBase58<ripple::AccountID>(boost::json::value_to<std::string>(input.ticket->at(JS(account))));
+            util::parseBase58Wrapper<ripple::AccountID>(boost::json::value_to<std::string>(input.ticket->at(JS(account))
+            ));
 
         key = ripple::getTicketIndex(*id, input.ticket->at(JS(ticket_seq)).as_int64());
     } else if (input.amm) {
@@ -113,7 +138,8 @@ LedgerEntryHandler::process(LedgerEntryHandler::Input input, Context const& ctx)
                 return ripple::xrpIssue();
             }
             auto const issuer =
-                ripple::parseBase58<ripple::AccountID>(boost::json::value_to<std::string>(assetJson.at(JS(issuer))));
+                util::parseBase58Wrapper<ripple::AccountID>(boost::json::value_to<std::string>(assetJson.at(JS(issuer)))
+                );
             return ripple::Issue{currency, *issuer};
         };
 
@@ -126,7 +152,7 @@ LedgerEntryHandler::process(LedgerEntryHandler::Input input, Context const& ctx)
             return Error{Status{ClioError::rpcMALFORMED_REQUEST}};
 
         if (input.bridgeAccount) {
-            auto const bridgeAccount = ripple::parseBase58<ripple::AccountID>(*(input.bridgeAccount));
+            auto const bridgeAccount = util::parseBase58Wrapper<ripple::AccountID>(*(input.bridgeAccount));
             auto const chainType = ripple::STXChainBridge::srcChain(bridgeAccount == input.bridge->lockingChainDoor());
 
             if (bridgeAccount != input.bridge->door(chainType))
@@ -141,6 +167,18 @@ LedgerEntryHandler::process(LedgerEntryHandler::Input input, Context const& ctx)
         }
     } else if (input.oracleNode) {
         key = input.oracleNode.value();
+    } else if (input.credential) {
+        key = input.credential.value();
+    } else if (input.mptIssuance) {
+        auto const mptIssuanceID = ripple::uint192{std::string_view(*(input.mptIssuance))};
+        key = ripple::keylet::mptIssuance(mptIssuanceID).key;
+    } else if (input.mptoken) {
+        auto const holder =
+            ripple::parseBase58<ripple::AccountID>(boost::json::value_to<std::string>(input.mptoken->at(JS(account))));
+        auto const mptIssuanceID =
+            ripple::uint192{std::string_view(boost::json::value_to<std::string>(input.mptoken->at(JS(mpt_issuance_id))))
+            };
+        key = ripple::keylet::mptoken(mptIssuanceID, *holder).key;
     } else {
         // Must specify 1 of the following fields to indicate what type
         if (ctx.apiVersion == 1)
@@ -150,7 +188,8 @@ LedgerEntryHandler::process(LedgerEntryHandler::Input input, Context const& ctx)
 
     // check ledger exists
     auto const range = sharedPtrBackend_->fetchLedgerRange();
-    auto const lgrInfoOrStatus = getLedgerInfoFromHashOrSeq(
+    ASSERT(range.has_value(), "LedgerEntry's ledger range must be available");
+    auto const lgrInfoOrStatus = getLedgerHeaderFromHashOrSeq(
         *sharedPtrBackend_, ctx.yield, input.ledgerHash, input.ledgerIndex, range->maxSequence
     );
 
@@ -158,17 +197,26 @@ LedgerEntryHandler::process(LedgerEntryHandler::Input input, Context const& ctx)
         return Error{*status};
 
     auto const lgrInfo = std::get<ripple::LedgerHeader>(lgrInfoOrStatus);
-    auto const ledgerObject = sharedPtrBackend_->fetchLedgerObject(key, lgrInfo.seq, ctx.yield);
+    auto output = LedgerEntryHandler::Output{};
+    auto ledgerObject = sharedPtrBackend_->fetchLedgerObject(key, lgrInfo.seq, ctx.yield);
 
-    if (!ledgerObject || ledgerObject->empty())
-        return Error{Status{"entryNotFound"}};
+    if (!ledgerObject || ledgerObject->empty()) {
+        if (not input.includeDeleted)
+            return Error{Status{"entryNotFound"}};
+        auto const deletedSeq = sharedPtrBackend_->fetchLedgerObjectSeq(key, lgrInfo.seq, ctx.yield);
+        if (!deletedSeq)
+            return Error{Status{"entryNotFound"}};
+        ledgerObject = sharedPtrBackend_->fetchLedgerObject(key, deletedSeq.value() - 1, ctx.yield);
+        if (!ledgerObject || ledgerObject->empty())
+            return Error{Status{"entryNotFound"}};
+        output.deletedLedgerIndex = deletedSeq;
+    }
 
     ripple::STLedgerEntry const sle{ripple::SerialIter{ledgerObject->data(), ledgerObject->size()}, key};
 
     if (input.expectedType != ripple::ltANY && sle.getType() != input.expectedType)
         return Error{Status{"unexpectedLedgerType"}};
 
-    auto output = LedgerEntryHandler::Output{};
     output.index = ripple::strHex(key);
     output.ledgerIndex = lgrInfo.seq;
     output.ledgerHash = ripple::strHex(lgrInfo.hash);
@@ -202,7 +250,7 @@ LedgerEntryHandler::composeKeyFromDirectory(boost::json::object const& directory
     }
 
     auto const ownerID =
-        ripple::parseBase58<ripple::AccountID>(boost::json::value_to<std::string>(directory.at(JS(owner))));
+        util::parseBase58Wrapper<ripple::AccountID>(boost::json::value_to<std::string>(directory.at(JS(owner))));
     return ripple::keylet::page(ripple::keylet::ownerDir(*ownerID), subIndex).key;
 }
 
@@ -215,6 +263,9 @@ tag_invoke(boost::json::value_from_tag, boost::json::value& jv, LedgerEntryHandl
         {JS(validated), output.validated},
         {JS(index), output.index},
     };
+
+    if (output.deletedLedgerIndex)
+        object["deleted_ledger_index"] = *(output.deletedLedgerIndex);
 
     if (output.nodeBinary) {
         object[JS(node_binary)] = *(output.nodeBinary);
@@ -260,13 +311,15 @@ tag_invoke(boost::json::value_to_tag<LedgerEntryHandler::Input>, boost::json::va
         {JS(xchain_owned_create_account_claim_id), ripple::ltXCHAIN_OWNED_CREATE_ACCOUNT_CLAIM_ID},
         {JS(xchain_owned_claim_id), ripple::ltXCHAIN_OWNED_CLAIM_ID},
         {JS(oracle), ripple::ltORACLE},
+        {JS(credential), ripple::ltCREDENTIAL},
+        {JS(mptoken), ripple::ltMPTOKEN},
     };
 
     auto const parseBridgeFromJson = [](boost::json::value const& bridgeJson) {
-        auto const lockingDoor = *ripple::parseBase58<ripple::AccountID>(
+        auto const lockingDoor = *util::parseBase58Wrapper<ripple::AccountID>(
             boost::json::value_to<std::string>(bridgeJson.at(ripple::sfLockingChainDoor.getJsonName().c_str()))
         );
-        auto const issuingDoor = *ripple::parseBase58<ripple::AccountID>(
+        auto const issuingDoor = *util::parseBase58Wrapper<ripple::AccountID>(
             boost::json::value_to<std::string>(bridgeJson.at(ripple::sfIssuingChainDoor.getJsonName().c_str()))
         );
         auto const lockingIssue =
@@ -279,17 +332,26 @@ tag_invoke(boost::json::value_to_tag<LedgerEntryHandler::Input>, boost::json::va
 
     auto const parseOracleFromJson = [](boost::json::value const& json) {
         auto const account =
-            ripple::parseBase58<ripple::AccountID>(boost::json::value_to<std::string>(json.at(JS(account))));
+            util::parseBase58Wrapper<ripple::AccountID>(boost::json::value_to<std::string>(json.at(JS(account))));
         auto const documentId = boost::json::value_to<uint32_t>(json.at(JS(oracle_document_id)));
 
         return ripple::keylet::oracle(*account, documentId).key;
     };
 
-    auto const indexFieldType =
-        std::find_if(indexFieldTypeMap.begin(), indexFieldTypeMap.end(), [&jsonObject](auto const& pair) {
-            auto const& [field, _] = pair;
-            return jsonObject.contains(field) && jsonObject.at(field).is_string();
-        });
+    auto const parseCredentialFromJson = [](boost::json::value const& json) {
+        auto const subject =
+            util::parseBase58Wrapper<ripple::AccountID>(boost::json::value_to<std::string>(json.at(JS(subject))));
+        auto const issuer =
+            util::parseBase58Wrapper<ripple::AccountID>(boost::json::value_to<std::string>(json.at(JS(issuer))));
+        auto const credType = ripple::strUnHex(boost::json::value_to<std::string>(json.at(JS(credential_type))));
+
+        return ripple::keylet::credential(*subject, *issuer, ripple::Slice(credType->data(), credType->size())).key;
+    };
+
+    auto const indexFieldType = std::ranges::find_if(indexFieldTypeMap, [&jsonObject](auto const& pair) {
+        auto const& [field, _] = pair;
+        return jsonObject.contains(field) && jsonObject.at(field).is_string();
+    });
 
     if (indexFieldType != indexFieldTypeMap.end()) {
         input.index = boost::json::value_to<std::string>(jv.at(indexFieldType->first));
@@ -300,6 +362,8 @@ tag_invoke(boost::json::value_to_tag<LedgerEntryHandler::Input>, boost::json::va
         input.accountRoot = boost::json::value_to<std::string>(jv.at(JS(account_root)));
     } else if (jsonObject.contains(JS(did))) {
         input.did = boost::json::value_to<std::string>(jv.at(JS(did)));
+    } else if (jsonObject.contains(JS(mpt_issuance))) {
+        input.mptIssuance = boost::json::value_to<std::string>(jv.at(JS(mpt_issuance)));
     }
     // no need to check if_object again, validator only allows string or object
     else if (jsonObject.contains(JS(directory))) {
@@ -331,7 +395,14 @@ tag_invoke(boost::json::value_to_tag<LedgerEntryHandler::Input>, boost::json::va
         );
     } else if (jsonObject.contains(JS(oracle))) {
         input.oracleNode = parseOracleFromJson(jv.at(JS(oracle)));
+    } else if (jsonObject.contains(JS(credential))) {
+        input.credential = parseCredentialFromJson(jv.at(JS(credential)));
+    } else if (jsonObject.contains(JS(mptoken))) {
+        input.mptoken = jv.at(JS(mptoken)).as_object();
     }
+
+    if (jsonObject.contains("include_deleted"))
+        input.includeDeleted = jv.at("include_deleted").as_bool();
 
     return input;
 }

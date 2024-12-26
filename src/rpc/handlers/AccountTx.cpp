@@ -25,6 +25,7 @@
 #include "rpc/RPCHelpers.hpp"
 #include "rpc/common/JsonBool.hpp"
 #include "rpc/common/Types.hpp"
+#include "util/Assert.hpp"
 #include "util/JsonUtils.hpp"
 #include "util/Profiler.hpp"
 #include "util/log/Logger.hpp"
@@ -34,12 +35,11 @@
 #include <boost/json/value.hpp>
 #include <boost/json/value_from.hpp>
 #include <boost/json/value_to.hpp>
-#include <ripple/basics/chrono.h>
-#include <ripple/basics/strHex.h>
-#include <ripple/protocol/AccountID.h>
-#include <ripple/protocol/ErrorCodes.h>
-#include <ripple/protocol/LedgerHeader.h>
-#include <ripple/protocol/jss.h>
+#include <xrpl/basics/chrono.h>
+#include <xrpl/basics/strHex.h>
+#include <xrpl/protocol/AccountID.h>
+#include <xrpl/protocol/LedgerHeader.h>
+#include <xrpl/protocol/jss.h>
 
 #include <cstdint>
 #include <limits>
@@ -56,6 +56,8 @@ AccountTxHandler::Result
 AccountTxHandler::process(AccountTxHandler::Input input, Context const& ctx) const
 {
     auto const range = sharedPtrBackend_->fetchLedgerRange();
+    ASSERT(range.has_value(), "AccountTX's ledger range must be available");
+
     auto [minIndex, maxIndex] = *range;
 
     if (input.ledgerIndexMin) {
@@ -92,7 +94,7 @@ AccountTxHandler::process(AccountTxHandler::Input input, Context const& ctx) con
         if (!input.ledgerIndexMax && !input.ledgerIndexMin) {
             // mimic rippled, when both range and index specified, respect the range.
             // take ledger from ledgerHash or ledgerIndex only when range is not specified
-            auto const lgrInfoOrStatus = getLedgerInfoFromHashOrSeq(
+            auto const lgrInfoOrStatus = getLedgerHeaderFromHashOrSeq(
                 *sharedPtrBackend_, ctx.yield, input.ledgerHash, input.ledgerIndex, range->maxSequence
             );
 
@@ -130,7 +132,7 @@ AccountTxHandler::process(AccountTxHandler::Input input, Context const& ctx) con
     Output response;
 
     if (retCursor)
-        response.marker = {retCursor->ledgerSequence, retCursor->transactionIndex};
+        response.marker = {.ledger = retCursor->ledgerSequence, .seq = retCursor->transactionIndex};
 
     for (auto const& txnPlusMeta : blobs) {
         // over the range
@@ -170,11 +172,11 @@ AccountTxHandler::process(AccountTxHandler::Input input, Context const& ctx) con
                         obj[JS(hash)] = obj[txKey].as_object()[JS(hash)];
                         obj[txKey].as_object().erase(JS(hash));
                     }
-                    if (auto const ledgerInfo =
+                    if (auto const ledgerHeader =
                             sharedPtrBackend_->fetchLedgerBySequence(txnPlusMeta.ledgerSequence, ctx.yield);
-                        ledgerInfo) {
-                        obj[JS(ledger_hash)] = ripple::strHex(ledgerInfo->hash);
-                        obj[JS(close_time_iso)] = ripple::to_string_iso(ledgerInfo->closeTime);
+                        ledgerHeader) {
+                        obj[JS(ledger_hash)] = ripple::strHex(ledgerHeader->hash);
+                        obj[JS(close_time_iso)] = ripple::to_string_iso(ledgerHeader->closeTime);
                     }
                 }
                 obj[JS(validated)] = true;
@@ -263,8 +265,8 @@ tag_invoke(boost::json::value_to_tag<AccountTxHandler::Input>, boost::json::valu
 
     if (jsonObject.contains(JS(marker))) {
         input.marker = AccountTxHandler::Marker{
-            jsonObject.at(JS(marker)).as_object().at(JS(ledger)).as_int64(),
-            jsonObject.at(JS(marker)).as_object().at(JS(seq)).as_int64()
+            .ledger = jsonObject.at(JS(marker)).as_object().at(JS(ledger)).as_int64(),
+            .seq = jsonObject.at(JS(marker)).as_object().at(JS(seq)).as_int64()
         };
     }
 

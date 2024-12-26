@@ -19,9 +19,10 @@
 
 #include "rpc/common/impl/HandlerProvider.hpp"
 
+#include "data/AmendmentCenterInterface.hpp"
 #include "data/BackendInterface.hpp"
 #include "etl/ETLService.hpp"
-#include "feed/SubscriptionManager.hpp"
+#include "feed/SubscriptionManagerInterface.hpp"
 #include "rpc/Counters.hpp"
 #include "rpc/common/AnyHandler.hpp"
 #include "rpc/handlers/AMMInfo.hpp"
@@ -36,11 +37,15 @@
 #include "rpc/handlers/BookChanges.hpp"
 #include "rpc/handlers/BookOffers.hpp"
 #include "rpc/handlers/DepositAuthorized.hpp"
+#include "rpc/handlers/Feature.hpp"
 #include "rpc/handlers/GatewayBalances.hpp"
+#include "rpc/handlers/GetAggregatePrice.hpp"
 #include "rpc/handlers/Ledger.hpp"
 #include "rpc/handlers/LedgerData.hpp"
 #include "rpc/handlers/LedgerEntry.hpp"
+#include "rpc/handlers/LedgerIndex.hpp"
 #include "rpc/handlers/LedgerRange.hpp"
+#include "rpc/handlers/MPTHolders.hpp"
 #include "rpc/handlers/NFTBuyOffers.hpp"
 #include "rpc/handlers/NFTHistory.hpp"
 #include "rpc/handlers/NFTInfo.hpp"
@@ -55,7 +60,7 @@
 #include "rpc/handlers/Tx.hpp"
 #include "rpc/handlers/Unsubscribe.hpp"
 #include "rpc/handlers/VersionHandler.hpp"
-#include "util/config/Config.hpp"
+#include "util/newconfig/ConfigDefinition.hpp"
 
 #include <memory>
 #include <optional>
@@ -64,45 +69,50 @@
 namespace rpc::impl {
 
 ProductionHandlerProvider::ProductionHandlerProvider(
-    util::Config const& config,
+    util::config::ClioConfigDefinition const& config,
     std::shared_ptr<BackendInterface> const& backend,
-    std::shared_ptr<feed::SubscriptionManager> const& subscriptionManager,
+    std::shared_ptr<feed::SubscriptionManagerInterface> const& subscriptionManager,
     std::shared_ptr<etl::LoadBalancer> const& balancer,
     std::shared_ptr<etl::ETLService const> const& etl,
+    std::shared_ptr<data::AmendmentCenterInterface const> const& amendmentCenter,
     Counters const& counters
 )
     : handlerMap_{
-          {"account_channels", {AccountChannelsHandler{backend}}},
-          {"account_currencies", {AccountCurrenciesHandler{backend}}},
-          {"account_info", {AccountInfoHandler{backend}}},
-          {"account_lines", {AccountLinesHandler{backend}}},
-          {"account_nfts", {AccountNFTsHandler{backend}}},
-          {"account_objects", {AccountObjectsHandler{backend}}},
-          {"account_offers", {AccountOffersHandler{backend}}},
-          {"account_tx", {AccountTxHandler{backend}}},
-          {"amm_info", {AMMInfoHandler{backend}}},
-          {"book_changes", {BookChangesHandler{backend}}},
-          {"book_offers", {BookOffersHandler{backend}}},
-          {"deposit_authorized", {DepositAuthorizedHandler{backend}}},
-          {"gateway_balances", {GatewayBalancesHandler{backend}}},
-          {"ledger", {LedgerHandler{backend}}},
-          {"ledger_data", {LedgerDataHandler{backend}}},
-          {"ledger_entry", {LedgerEntryHandler{backend}}},
-          {"ledger_range", {LedgerRangeHandler{backend}}},
-          {"nfts_by_issuer", {NFTsByIssuerHandler{backend}, true}},  // clio only
-          {"nft_history", {NFTHistoryHandler{backend}, true}},       // clio only
-          {"nft_buy_offers", {NFTBuyOffersHandler{backend}}},
-          {"nft_info", {NFTInfoHandler{backend}, true}},  // clio only
-          {"nft_sell_offers", {NFTSellOffersHandler{backend}}},
-          {"noripple_check", {NoRippleCheckHandler{backend}}},
-          {"ping", {PingHandler{}}},
-          {"random", {RandomHandler{}}},
-          {"server_info", {ServerInfoHandler{backend, subscriptionManager, balancer, etl, counters}}},
-          {"transaction_entry", {TransactionEntryHandler{backend}}},
-          {"tx", {TxHandler{backend, etl}}},
-          {"subscribe", {SubscribeHandler{backend, subscriptionManager}}},
-          {"unsubscribe", {UnsubscribeHandler{backend, subscriptionManager}}},
-          {"version", {VersionHandler{config}}},
+          {"account_channels", {.handler = AccountChannelsHandler{backend}}},
+          {"account_currencies", {.handler = AccountCurrenciesHandler{backend}}},
+          {"account_info", {.handler = AccountInfoHandler{backend, amendmentCenter}}},
+          {"account_lines", {.handler = AccountLinesHandler{backend}}},
+          {"account_nfts", {.handler = AccountNFTsHandler{backend}}},
+          {"account_objects", {.handler = AccountObjectsHandler{backend}}},
+          {"account_offers", {.handler = AccountOffersHandler{backend}}},
+          {"account_tx", {.handler = AccountTxHandler{backend}}},
+          {"amm_info", {.handler = AMMInfoHandler{backend}}},
+          {"book_changes", {.handler = BookChangesHandler{backend}}},
+          {"book_offers", {.handler = BookOffersHandler{backend}}},
+          {"deposit_authorized", {.handler = DepositAuthorizedHandler{backend}}},
+          {"feature", {.handler = FeatureHandler{backend, amendmentCenter}}},
+          {"gateway_balances", {.handler = GatewayBalancesHandler{backend}}},
+          {"get_aggregate_price", {.handler = GetAggregatePriceHandler{backend}}},
+          {"ledger", {.handler = LedgerHandler{backend}}},
+          {"ledger_data", {.handler = LedgerDataHandler{backend}}},
+          {"ledger_entry", {.handler = LedgerEntryHandler{backend}}},
+          {"ledger_index", {.handler = LedgerIndexHandler{backend}, .isClioOnly = true}},  // clio only
+          {"ledger_range", {.handler = LedgerRangeHandler{backend}}},
+          {"mpt_holders", {.handler = MPTHoldersHandler{backend}, .isClioOnly = true}},       // clio only
+          {"nfts_by_issuer", {.handler = NFTsByIssuerHandler{backend}, .isClioOnly = true}},  // clio only
+          {"nft_history", {.handler = NFTHistoryHandler{backend}, .isClioOnly = true}},       // clio only
+          {"nft_buy_offers", {.handler = NFTBuyOffersHandler{backend}}},
+          {"nft_info", {.handler = NFTInfoHandler{backend}, .isClioOnly = true}},  // clio only
+          {"nft_sell_offers", {.handler = NFTSellOffersHandler{backend}}},
+          {"noripple_check", {.handler = NoRippleCheckHandler{backend}}},
+          {"ping", {.handler = PingHandler{}}},
+          {"random", {.handler = RandomHandler{}}},
+          {"server_info", {.handler = ServerInfoHandler{backend, subscriptionManager, balancer, etl, counters}}},
+          {"transaction_entry", {.handler = TransactionEntryHandler{backend}}},
+          {"tx", {.handler = TxHandler{backend, etl}}},
+          {"subscribe", {.handler = SubscribeHandler{backend, subscriptionManager}}},
+          {"unsubscribe", {.handler = UnsubscribeHandler{subscriptionManager}}},
+          {"version", {.handler = VersionHandler{config}}},
       }
 {
 }
@@ -110,7 +120,7 @@ ProductionHandlerProvider::ProductionHandlerProvider(
 bool
 ProductionHandlerProvider::contains(std::string const& command) const
 {
-    return handlerMap_.contains(command);  // updated on 4 mar 2024
+    return handlerMap_.contains(command);
 }
 
 std::optional<AnyHandler>

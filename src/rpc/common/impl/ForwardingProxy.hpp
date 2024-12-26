@@ -25,7 +25,7 @@
 #include "util/log/Logger.hpp"
 #include "web/Context.hpp"
 
-#include <ripple/protocol/ErrorCodes.h>
+#include <xrpl/protocol/ErrorCodes.h>
 
 #include <functional>
 #include <memory>
@@ -55,6 +55,8 @@ public:
     bool
     shouldForward(web::Context const& ctx) const
     {
+        auto const& request = ctx.params;
+
         if (ctx.method == "subscribe" || ctx.method == "unsubscribe")
             return false;
 
@@ -64,9 +66,10 @@ public:
         if (isProxied(ctx.method))
             return true;
 
-        auto const& request = ctx.params;
-
         if (specifiesCurrentOrClosedLedger(request))
+            return true;
+
+        if (isForcedForward(ctx))
             return true;
 
         auto const checkAccountInfoForward = [&]() {
@@ -75,11 +78,8 @@ public:
         };
 
         auto const checkLedgerForward = [&]() {
-            return ctx.method == "ledger" and
-                ((request.contains("queue") and request.at("queue").is_bool() and request.at("queue").as_bool()) or
-                 (request.contains("full") and request.at("full").is_bool() and request.at("full").as_bool()) or
-                 (request.contains("accounts") and request.at("accounts").is_bool() and request.at("accounts").as_bool()
-                 ));
+            return ctx.method == "ledger" and request.contains("queue") and request.at("queue").is_bool() and
+                request.at("queue").as_bool();
         };
 
         return static_cast<bool>(checkAccountInfoForward() or checkLedgerForward());
@@ -91,14 +91,14 @@ public:
         auto toForward = ctx.params;
         toForward["command"] = ctx.method;
 
-        auto const res = balancer_->forwardToRippled(toForward, ctx.clientIp, ctx.yield);
+        auto res = balancer_->forwardToRippled(toForward, ctx.clientIp, ctx.isAdmin, ctx.yield);
         if (not res) {
             notifyFailedToForward(ctx.method);
-            return Status{RippledError::rpcFAILED_TO_FORWARD};
+            return Result{Status{CombinedError{res.error()}}};
         }
 
         notifyForwarded(ctx.method);
-        return *res;
+        return Result{std::move(res).value()};
     }
 
     bool
@@ -140,6 +140,14 @@ private:
     validHandler(std::string const& method) const
     {
         return handlerProvider_->contains(method) || isProxied(method);
+    }
+
+    bool
+    isForcedForward(web::Context const& ctx) const
+    {
+        static constexpr auto FORCE_FORWARD = "force_forward";
+        return ctx.isAdmin and ctx.params.contains(FORCE_FORWARD) and ctx.params.at(FORCE_FORWARD).is_bool() and
+            ctx.params.at(FORCE_FORWARD).as_bool();
     }
 };
 

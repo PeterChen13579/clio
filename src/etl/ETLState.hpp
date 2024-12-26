@@ -23,6 +23,7 @@
 
 #include <boost/json.hpp>
 #include <boost/json/conversion.hpp>
+#include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
 #include <boost/json/value_to.hpp>
 
@@ -46,12 +47,15 @@ struct ETLState {
     static std::optional<ETLState>
     fetchETLStateFromSource(Forward& source) noexcept
     {
-        auto const serverInfoRippled = data::synchronous([&source](auto yield) {
-            return source.forwardToRippled({{"command", "server_info"}}, std::nullopt, yield);
+        auto const serverInfoRippled = data::synchronous([&source](auto yield) -> std::optional<boost::json::object> {
+            if (auto result = source.forwardToRippled({{"command", "server_info"}}, std::nullopt, {}, yield)) {
+                return std::move(result).value();
+            }
+            return std::nullopt;
         });
 
         if (serverInfoRippled)
-            return boost::json::value_to<ETLState>(boost::json::value(*serverInfoRippled));
+            return boost::json::value_to<std::optional<ETLState>>(boost::json::value(*serverInfoRippled));
 
         return std::nullopt;
     }
@@ -63,7 +67,7 @@ struct ETLState {
  * @param jv The json value to convert
  * @return The ETLState
  */
-ETLState
-tag_invoke(boost::json::value_to_tag<ETLState>, boost::json::value const& jv);
+std::optional<ETLState>
+tag_invoke(boost::json::value_to_tag<std::optional<ETLState>>, boost::json::value const& jv);
 
 }  // namespace etl

@@ -22,6 +22,7 @@
 #include "data/DBHelpers.hpp"
 #include "data/LedgerCache.hpp"
 #include "data/Types.hpp"
+#include "etl/CorruptionDetector.hpp"
 #include "util/log/Logger.hpp"
 
 #include <boost/asio/executor_work_guard.hpp>
@@ -30,10 +31,10 @@
 #include <boost/json.hpp>
 #include <boost/json/object.hpp>
 #include <boost/utility/result_of.hpp>
-#include <ripple/basics/base_uint.h>
-#include <ripple/protocol/AccountID.h>
-#include <ripple/protocol/Fees.h>
-#include <ripple/protocol/LedgerHeader.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/protocol/AccountID.h>
+#include <xrpl/protocol/Fees.h>
+#include <xrpl/protocol/LedgerHeader.h>
 
 #include <chrono>
 #include <cstddef>
@@ -44,6 +45,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace data {
@@ -138,6 +140,7 @@ protected:
     mutable std::shared_mutex rngMtx_;
     std::optional<LedgerRange> range;
     LedgerCache cache_;
+    std::optional<etl::CorruptionDetector<LedgerCache>> corruptionDetector_;
 
 public:
     BackendInterface() = default;
@@ -160,6 +163,17 @@ public:
     cache()
     {
         return cache_;
+    }
+
+    /**
+     * @brief Sets the corruption detector.
+     *
+     * @param detector The corruption detector to set
+     */
+    void
+    setCorruptionDetector(etl::CorruptionDetector<LedgerCache> detector)
+    {
+        corruptionDetector_ = std::move(detector);
     }
 
     /**
@@ -351,6 +365,25 @@ public:
     ) const = 0;
 
     /**
+     * @brief Fetches all holders' balances for a MPTIssuanceID
+     *
+     * @param mptID MPTIssuanceID you wish you query.
+     * @param limit Paging limit.
+     * @param cursorIn Optional cursor to allow us to pick up from where we last left off.
+     * @param ledgerSequence The ledger sequence to fetch for
+     * @param yield Currently executing coroutine.
+     * @return std::vector<Blob> of MPToken balances and an optional marker
+     */
+    virtual MPTHoldersAndCursor
+    fetchMPTHolders(
+        ripple::uint192 const& mptID,
+        std::uint32_t const limit,
+        std::optional<ripple::AccountID> const& cursorIn,
+        std::uint32_t const ledgerSequence,
+        boost::asio::yield_context yield
+    ) const = 0;
+
+    /**
      * @brief Fetches a specific ledger object.
      *
      * Currently the real fetch happens in doFetchLedgerObject and fetchLedgerObject attempts to fetch from Cache first
@@ -363,6 +396,19 @@ public:
      */
     std::optional<Blob>
     fetchLedgerObject(ripple::uint256 const& key, std::uint32_t sequence, boost::asio::yield_context yield) const;
+
+    /**
+     * @brief Fetches a specific ledger object sequence.
+     *
+     * Currently the real fetch happens in doFetchLedgerObjectSeq
+     *
+     * @param key The key of the object
+     * @param sequence The ledger sequence to fetch for
+     * @param yield The coroutine context
+     * @return The sequence in unit32_t on success; nullopt otherwise
+     */
+    std::optional<std::uint32_t>
+    fetchLedgerObjectSeq(ripple::uint256 const& key, std::uint32_t sequence, boost::asio::yield_context yield) const;
 
     /**
      * @brief Fetches all ledger objects by their keys.
@@ -392,6 +438,18 @@ public:
      */
     virtual std::optional<Blob>
     doFetchLedgerObject(ripple::uint256 const& key, std::uint32_t sequence, boost::asio::yield_context yield) const = 0;
+
+    /**
+     * @brief The database-specific implementation for fetching a ledger object sequence.
+     *
+     * @param key The key to fetch for
+     * @param sequence The ledger sequence to fetch for
+     * @param yield The coroutine context
+     * @return The sequence in unit32_t on success; nullopt otherwise
+     */
+    virtual std::optional<std::uint32_t>
+    doFetchLedgerObjectSeq(ripple::uint256 const& key, std::uint32_t sequence, boost::asio::yield_context yield)
+        const = 0;
 
     /**
      * @brief The database-specific implementation for fetching ledger objects.
@@ -435,7 +493,7 @@ public:
         std::uint32_t limit,
         bool outOfOrder,
         boost::asio::yield_context yield
-    ) const;
+    );
 
     /**
      * @brief Fetches the successor object.
@@ -489,6 +547,16 @@ public:
         std::uint32_t limit,
         boost::asio::yield_context yield
     ) const;
+
+    /**
+     * @brief Fetches the status of migrator by name.
+     *
+     * @param migratorName The name of the migrator
+     * @param yield The coroutine context
+     * @return The status of the migrator if found; nullopt otherwise
+     */
+    virtual std::optional<std::string>
+    fetchMigratorStatus(std::string const& migratorName, boost::asio::yield_context yield) const = 0;
 
     /**
      * @brief Synchronously fetches the ledger range from DB.
@@ -579,6 +647,14 @@ public:
     writeNFTTransactions(std::vector<NFTTransactionsData> const& data) = 0;
 
     /**
+     * @brief Write accounts that started holding onto a MPT.
+     *
+     * @param data A vector of MPT ID and account pairs
+     */
+    virtual void
+    writeMPTHolders(std::vector<MPTHolderData> const& data) = 0;
+
+    /**
      * @brief Write a new successor.
      *
      * @param key Key of the object that the passed successor will be the successor for
@@ -606,6 +682,15 @@ public:
      */
     bool
     finishWrites(std::uint32_t ledgerSequence);
+
+    /**
+     * @brief Mark the migration status of a migrator as Migrated in the database
+     *
+     * @param migratorName The name of the migrator
+     * @param status The status to set
+     */
+    virtual void
+    writeMigratorStatus(std::string const& migratorName, std::string const& status) = 0;
 
     /**
      * @return true if database is overwhelmed; false otherwise

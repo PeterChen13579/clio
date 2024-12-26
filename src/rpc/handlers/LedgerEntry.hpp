@@ -22,24 +22,28 @@
 #include "data/BackendInterface.hpp"
 #include "rpc/Errors.hpp"
 #include "rpc/JS.hpp"
+#include "rpc/common/Checkers.hpp"
 #include "rpc/common/MetaProcessors.hpp"
+#include "rpc/common/Modifiers.hpp"
 #include "rpc/common/Specs.hpp"
 #include "rpc/common/Types.hpp"
 #include "rpc/common/Validators.hpp"
+#include "util/AccountUtils.hpp"
 
+#include <boost/json/array.hpp>
 #include <boost/json/conversion.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
 #include <boost/json/value_to.hpp>
-#include <ripple/basics/base_uint.h>
-#include <ripple/beast/core/LexicalCast.h>
-#include <ripple/protocol/AccountID.h>
-#include <ripple/protocol/ErrorCodes.h>
-#include <ripple/protocol/Issue.h>
-#include <ripple/protocol/LedgerFormats.h>
-#include <ripple/protocol/SField.h>
-#include <ripple/protocol/jss.h>
-#include <ripple/protocol/tokens.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/beast/core/LexicalCast.h>
+#include <xrpl/protocol/AccountID.h>
+#include <xrpl/protocol/ErrorCodes.h>
+#include <xrpl/protocol/Issue.h>
+#include <xrpl/protocol/LedgerFormats.h>
+#include <xrpl/protocol/SField.h>
+#include <xrpl/protocol/jss.h>
+#include <xrpl/protocol/tokens.h>
 
 #include <cstdint>
 #include <memory>
@@ -68,6 +72,7 @@ public:
         std::string ledgerHash;
         std::optional<boost::json::object> node;
         std::optional<std::string> nodeBinary;
+        std::optional<uint32_t> deletedLedgerIndex;
         bool validated = true;
     };
 
@@ -87,6 +92,8 @@ public:
         std::optional<std::string> accountRoot;
         // account id to address did object
         std::optional<std::string> did;
+        // mpt issuance id to address mptIssuance object
+        std::optional<std::string> mptIssuance;
         // TODO: extract into custom objects, remove json from Input
         std::optional<boost::json::object> directory;
         std::optional<boost::json::object> offer;
@@ -95,11 +102,14 @@ public:
         std::optional<boost::json::object> depositPreauth;
         std::optional<boost::json::object> ticket;
         std::optional<boost::json::object> amm;
+        std::optional<boost::json::object> mptoken;
         std::optional<ripple::STXChainBridge> bridge;
         std::optional<std::string> bridgeAccount;
         std::optional<uint32_t> chainClaimId;
         std::optional<uint32_t> createAccountClaimId;
         std::optional<ripple::uint256> oracleNode;
+        std::optional<ripple::uint256> credential;
+        bool includeDeleted = false;
     };
 
     using Result = HandlerReturnType<Output>;
@@ -134,9 +144,11 @@ public:
                 }
 
                 auto const id1 =
-                    ripple::parseBase58<ripple::AccountID>(boost::json::value_to<std::string>(value.as_array()[0]));
+                    util::parseBase58Wrapper<ripple::AccountID>(boost::json::value_to<std::string>(value.as_array()[0])
+                    );
                 auto const id2 =
-                    ripple::parseBase58<ripple::AccountID>(boost::json::value_to<std::string>(value.as_array()[1]));
+                    util::parseBase58Wrapper<ripple::AccountID>(boost::json::value_to<std::string>(value.as_array()[1])
+                    );
 
                 if (!id1 || !id2)
                     return Error{Status{ClioError::rpcMALFORMED_ADDRESS, "malformedAddresses"}};
@@ -144,8 +156,9 @@ public:
                 return MaybeError{};
             }};
 
-        static auto const malformedRequestHexStringValidator =
-            meta::WithCustomError{validation::Uint256HexStringValidator, Status(ClioError::rpcMALFORMED_REQUEST)};
+        static auto const malformedRequestHexStringValidator = meta::WithCustomError{
+            validation::CustomValidators::Uint256HexStringValidator, Status(ClioError::rpcMALFORMED_REQUEST)
+        };
 
         static auto const malformedRequestIntValidator =
             meta::WithCustomError{validation::Type<uint32_t>{}, Status(ClioError::rpcMALFORMED_REQUEST)};
@@ -154,27 +167,27 @@ public:
             meta::IfType<boost::json::object>{meta::Section{
                 {ripple::sfLockingChainDoor.getJsonName().c_str(),
                  validation::Required{},
-                 validation::AccountBase58Validator},
+                 validation::CustomValidators::AccountBase58Validator},
                 {ripple::sfIssuingChainDoor.getJsonName().c_str(),
                  validation::Required{},
-                 validation::AccountBase58Validator},
+                 validation::CustomValidators::AccountBase58Validator},
                 {ripple::sfLockingChainIssue.getJsonName().c_str(),
                  validation::Required{},
-                 validation::CurrencyIssueValidator},
+                 validation::CustomValidators::CurrencyIssueValidator},
                 {ripple::sfIssuingChainIssue.getJsonName().c_str(),
                  validation::Required{},
-                 validation::CurrencyIssueValidator},
+                 validation::CustomValidators::CurrencyIssueValidator},
             }},
             Status(ClioError::rpcMALFORMED_REQUEST)
         };
 
         static auto const rpcSpec = RpcSpec{
             {JS(binary), validation::Type<bool>{}},
-            {JS(ledger_hash), validation::Uint256HexStringValidator},
-            {JS(ledger_index), validation::LedgerIndexValidator},
+            {JS(ledger_hash), validation::CustomValidators::Uint256HexStringValidator},
+            {JS(ledger_index), validation::CustomValidators::LedgerIndexValidator},
             {JS(index), malformedRequestHexStringValidator},
-            {JS(account_root), validation::AccountBase58Validator},
-            {JS(did), validation::AccountBase58Validator},
+            {JS(account_root), validation::CustomValidators::AccountBase58Validator},
+            {JS(did), validation::CustomValidators::AccountBase58Validator},
             {JS(check), malformedRequestHexStringValidator},
             {JS(deposit_preauth),
              validation::Type<std::string, boost::json::object>{},
@@ -183,16 +196,19 @@ public:
                  meta::Section{
                      {JS(owner),
                       validation::Required{},
-                      meta::WithCustomError{validation::AccountBase58Validator, Status(ClioError::rpcMALFORMED_OWNER)}},
-                     {JS(authorized), validation::Required{}, validation::AccountBase58Validator},
+                      meta::WithCustomError{
+                          validation::CustomValidators::AccountBase58Validator, Status(ClioError::rpcMALFORMED_OWNER)
+                      }},
+                     {JS(authorized), validation::CustomValidators::AccountBase58Validator},
+                     {JS(authorized_credentials), validation::CustomValidators::AuthorizeCredentialValidator}
                  },
              }},
             {JS(directory),
              validation::Type<std::string, boost::json::object>{},
              meta::IfType<std::string>{malformedRequestHexStringValidator},
              meta::IfType<boost::json::object>{meta::Section{
-                 {JS(owner), validation::AccountBase58Validator},
-                 {JS(dir_root), validation::Uint256HexStringValidator},
+                 {JS(owner), validation::CustomValidators::AccountBase58Validator},
+                 {JS(dir_root), validation::CustomValidators::Uint256HexStringValidator},
                  {JS(sub_index), malformedRequestIntValidator}
              }}},
             {JS(escrow),
@@ -202,7 +218,9 @@ public:
                  meta::Section{
                      {JS(owner),
                       validation::Required{},
-                      meta::WithCustomError{validation::AccountBase58Validator, Status(ClioError::rpcMALFORMED_OWNER)}},
+                      meta::WithCustomError{
+                          validation::CustomValidators::AccountBase58Validator, Status(ClioError::rpcMALFORMED_OWNER)
+                      }},
                      {JS(seq), validation::Required{}, malformedRequestIntValidator},
                  },
              }},
@@ -211,7 +229,7 @@ public:
              meta::IfType<std::string>{malformedRequestHexStringValidator},
              meta::IfType<boost::json::object>{
                  meta::Section{
-                     {JS(account), validation::Required{}, validation::AccountBase58Validator},
+                     {JS(account), validation::Required{}, validation::CustomValidators::AccountBase58Validator},
                      {JS(seq), validation::Required{}, malformedRequestIntValidator},
                  },
              }},
@@ -220,14 +238,14 @@ public:
              validation::Type<boost::json::object>{},
              meta::Section{
                  {JS(accounts), validation::Required{}, rippleStateAccountsCheck},
-                 {JS(currency), validation::Required{}, validation::CurrencyValidator},
+                 {JS(currency), validation::Required{}, validation::CustomValidators::CurrencyValidator},
              }},
             {JS(ticket),
              validation::Type<std::string, boost::json::object>{},
              meta::IfType<std::string>{malformedRequestHexStringValidator},
              meta::IfType<boost::json::object>{
                  meta::Section{
-                     {JS(account), validation::Required{}, validation::AccountBase58Validator},
+                     {JS(account), validation::Required{}, validation::CustomValidators::AccountBase58Validator},
                      {JS(ticket_seq), validation::Required{}, malformedRequestIntValidator},
                  },
              }},
@@ -242,20 +260,22 @@ public:
                       meta::WithCustomError{
                           validation::Type<boost::json::object>{}, Status(ClioError::rpcMALFORMED_REQUEST)
                       },
-                      validation::CurrencyIssueValidator},
+                      validation::CustomValidators::CurrencyIssueValidator},
                      {JS(asset2),
                       meta::WithCustomError{validation::Required{}, Status(ClioError::rpcMALFORMED_REQUEST)},
                       meta::WithCustomError{
                           validation::Type<boost::json::object>{}, Status(ClioError::rpcMALFORMED_REQUEST)
                       },
-                      validation::CurrencyIssueValidator},
+                      validation::CustomValidators::CurrencyIssueValidator},
                  },
              }},
             {JS(bridge),
              meta::WithCustomError{validation::Type<boost::json::object>{}, Status(ClioError::rpcMALFORMED_REQUEST)},
              bridgeJsonValidator},
             {JS(bridge_account),
-             meta::WithCustomError{validation::AccountBase58Validator, Status(ClioError::rpcMALFORMED_REQUEST)}},
+             meta::WithCustomError{
+                 validation::CustomValidators::AccountBase58Validator, Status(ClioError::rpcMALFORMED_REQUEST)
+             }},
             {JS(xchain_owned_claim_id),
              meta::WithCustomError{
                  validation::Type<std::string, boost::json::object>{}, Status(ClioError::rpcMALFORMED_REQUEST)
@@ -290,14 +310,72 @@ public:
              meta::IfType<boost::json::object>{meta::Section{
                  {JS(account),
                   meta::WithCustomError{validation::Required{}, Status(ClioError::rpcMALFORMED_REQUEST)},
-                  meta::WithCustomError{validation::AccountBase58Validator, Status(ClioError::rpcMALFORMED_ADDRESS)}},
+                  meta::WithCustomError{
+                      validation::CustomValidators::AccountBase58Validator, Status(ClioError::rpcMALFORMED_ADDRESS)
+                  }},
                  // note: Unlike `rippled`, Clio only supports UInt as input, no string, no `null`, etc.:
                  {JS(oracle_document_id),
                   meta::WithCustomError{validation::Required{}, Status(ClioError::rpcMALFORMED_REQUEST)},
                   meta::WithCustomError{
-                      validation::Type<uint32_t>{}, Status(ClioError::rpcMALFORMED_ORACLE_DOCUMENT_ID)
+                      validation::Type<uint32_t, std::string>{}, Status(ClioError::rpcMALFORMED_ORACLE_DOCUMENT_ID)
+                  },
+                  meta::WithCustomError{modifiers::ToNumber{}, Status(ClioError::rpcMALFORMED_ORACLE_DOCUMENT_ID)}},
+             }}},
+            {JS(credential),
+             meta::WithCustomError{
+                 validation::Type<std::string, boost::json::object>{}, Status(ClioError::rpcMALFORMED_REQUEST)
+             },
+             meta::IfType<std::string>{
+                 meta::WithCustomError{malformedRequestHexStringValidator, Status(ClioError::rpcMALFORMED_ADDRESS)}
+             },
+             meta::IfType<boost::json::object>{meta::Section{
+                 {JS(subject),
+                  meta::WithCustomError{validation::Required{}, Status(ClioError::rpcMALFORMED_REQUEST)},
+                  meta::WithCustomError{
+                      validation::CustomValidators::AccountBase58Validator, Status(ClioError::rpcMALFORMED_ADDRESS)
                   }},
-             }}}
+                 {JS(issuer),
+                  meta::WithCustomError{validation::Required{}, Status(ClioError::rpcMALFORMED_REQUEST)},
+                  meta::WithCustomError{
+                      validation::CustomValidators::AccountBase58Validator, Status(ClioError::rpcMALFORMED_ADDRESS)
+                  }},
+                 {
+                     JS(credential_type),
+                     meta::WithCustomError{validation::Required{}, Status(ClioError::rpcMALFORMED_REQUEST)},
+                     meta::WithCustomError{validation::Type<std::string>{}, Status(ClioError::rpcMALFORMED_REQUEST)},
+                 },
+             }}},
+            {JS(mpt_issuance),
+             meta::WithCustomError{
+                 validation::CustomValidators::Uint192HexStringValidator, Status(ClioError::rpcMALFORMED_REQUEST)
+             }},
+            {JS(mptoken),
+             meta::WithCustomError{
+                 validation::Type<std::string, boost::json::object>{}, Status(ClioError::rpcMALFORMED_REQUEST)
+             },
+             meta::IfType<std::string>{malformedRequestHexStringValidator},
+             meta::IfType<boost::json::object>{
+                 meta::Section{
+                     {
+                         JS(account),
+                         meta::WithCustomError{validation::Required{}, Status(ClioError::rpcMALFORMED_REQUEST)},
+                         meta::WithCustomError{
+                             validation::CustomValidators::AccountBase58Validator,
+                             Status(ClioError::rpcMALFORMED_ADDRESS)
+                         },
+                     },
+                     {
+                         JS(mpt_issuance_id),
+                         meta::WithCustomError{validation::Required{}, Status(ClioError::rpcMALFORMED_REQUEST)},
+                         meta::WithCustomError{
+                             validation::CustomValidators::Uint192HexStringValidator,
+                             Status(ClioError::rpcMALFORMED_REQUEST)
+                         },
+                     },
+                 },
+             }},
+            {JS(ledger), check::Deprecated{}},
+            {"include_deleted", validation::Type<bool>{}},
         };
 
         return rpcSpec;

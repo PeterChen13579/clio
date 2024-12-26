@@ -22,26 +22,25 @@
 #include "data/BackendInterface.hpp"
 #include "data/LedgerCache.hpp"
 #include "etl/CacheLoader.hpp"
-#include "etl/ETLHelpers.hpp"
 #include "etl/ETLState.hpp"
 #include "etl/LoadBalancer.hpp"
+#include "etl/NetworkValidatedLedgersInterface.hpp"
 #include "etl/SystemState.hpp"
-#include "etl/impl/AmendmentBlock.hpp"
+#include "etl/impl/AmendmentBlockHandler.hpp"
 #include "etl/impl/ExtractionDataPipe.hpp"
 #include "etl/impl/Extractor.hpp"
 #include "etl/impl/LedgerFetcher.hpp"
 #include "etl/impl/LedgerLoader.hpp"
 #include "etl/impl/LedgerPublisher.hpp"
 #include "etl/impl/Transformer.hpp"
-#include "feed/SubscriptionManager.hpp"
+#include "feed/SubscriptionManagerInterface.hpp"
 #include "util/log/Logger.hpp"
 
 #include <boost/asio/io_context.hpp>
-#include <boost/asio/steady_timer.hpp>
 #include <boost/json/object.hpp>
 #include <grpcpp/grpcpp.h>
 #include <org/xrpl/rpc/v1/get_ledger.pb.h>
-#include <ripple/proto/org/xrpl/rpc/v1/xrp_ledger.grpc.pb.h>
+#include <xrpl/proto/org/xrpl/rpc/v1/xrp_ledger.grpc.pb.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -53,9 +52,6 @@
 struct AccountTransactionsData;
 struct NFTTransactionsData;
 struct NFTsData;
-namespace feed {
-class SubscriptionManager;
-}  // namespace feed
 
 /**
  * @brief This namespace contains everything to do with the ETL and ETL sources.
@@ -77,17 +73,15 @@ namespace etl {
  */
 class ETLService {
     // TODO: make these template parameters in ETLService
-    using SubscriptionManagerType = feed::SubscriptionManager;
     using LoadBalancerType = LoadBalancer;
-    using NetworkValidatedLedgersType = NetworkValidatedLedgers;
     using DataPipeType = etl::impl::ExtractionDataPipe<org::xrpl::rpc::v1::GetLedgerResponse>;
     using CacheType = data::LedgerCache;
     using CacheLoaderType = etl::CacheLoader<CacheType>;
     using LedgerFetcherType = etl::impl::LedgerFetcher<LoadBalancerType>;
-    using ExtractorType = etl::impl::Extractor<DataPipeType, NetworkValidatedLedgersType, LedgerFetcherType>;
+    using ExtractorType = etl::impl::Extractor<DataPipeType, LedgerFetcherType>;
     using LedgerLoaderType = etl::impl::LedgerLoader<LoadBalancerType, LedgerFetcherType>;
-    using LedgerPublisherType = etl::impl::LedgerPublisher<SubscriptionManagerType, CacheType>;
-    using AmendmentBlockHandlerType = etl::impl::AmendmentBlockHandler<>;
+    using LedgerPublisherType = etl::impl::LedgerPublisher<CacheType>;
+    using AmendmentBlockHandlerType = etl::impl::AmendmentBlockHandler;
     using TransformerType =
         etl::impl::Transformer<DataPipeType, LedgerLoaderType, LedgerPublisherType, AmendmentBlockHandlerType>;
 
@@ -95,7 +89,7 @@ class ETLService {
 
     std::shared_ptr<BackendInterface> backend_;
     std::shared_ptr<LoadBalancerType> loadBalancer_;
-    std::shared_ptr<NetworkValidatedLedgersType> networkValidatedLedgers_;
+    std::shared_ptr<NetworkValidatedLedgersInterface> networkValidatedLedgers_;
 
     std::uint32_t extractorThreads_ = 1;
     std::thread worker_;
@@ -125,12 +119,12 @@ public:
      * @param ledgers The network validated ledgers datastructure
      */
     ETLService(
-        util::Config const& config,
+        util::config::ClioConfigDefinition const& config,
         boost::asio::io_context& ioc,
         std::shared_ptr<BackendInterface> backend,
-        std::shared_ptr<SubscriptionManagerType> subscriptions,
+        std::shared_ptr<feed::SubscriptionManagerInterface> subscriptions,
         std::shared_ptr<LoadBalancerType> balancer,
-        std::shared_ptr<NetworkValidatedLedgersType> ledgers
+        std::shared_ptr<NetworkValidatedLedgersInterface> ledgers
     );
 
     /**
@@ -148,12 +142,12 @@ public:
      */
     static std::shared_ptr<ETLService>
     make_ETLService(
-        util::Config const& config,
+        util::config::ClioConfigDefinition const& config,
         boost::asio::io_context& ioc,
         std::shared_ptr<BackendInterface> backend,
-        std::shared_ptr<SubscriptionManagerType> subscriptions,
+        std::shared_ptr<feed::SubscriptionManagerInterface> subscriptions,
         std::shared_ptr<LoadBalancerType> balancer,
-        std::shared_ptr<NetworkValidatedLedgersType> ledgers
+        std::shared_ptr<NetworkValidatedLedgersInterface> ledgers
     )
     {
         auto etl = std::make_shared<ETLService>(config, ioc, backend, subscriptions, balancer, ledgers);
@@ -199,6 +193,17 @@ public:
     isAmendmentBlocked() const
     {
         return state_.isAmendmentBlocked;
+    }
+
+    /**
+     * @brief Check whether Clio detected DB corruptions.
+     *
+     * @return true if corruption of DB was detected and cache was stopped.
+     */
+    bool
+    isCorruptionDetected() const
+    {
+        return state_.isCorruptionDetected;
     }
 
     /**

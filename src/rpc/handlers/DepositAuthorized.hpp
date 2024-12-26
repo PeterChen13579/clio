@@ -25,9 +25,11 @@
 #include "rpc/common/Types.hpp"
 #include "rpc/common/Validators.hpp"
 
+#include <boost/json/array.hpp>
 #include <boost/json/conversion.hpp>
 #include <boost/json/value.hpp>
-#include <ripple/protocol/jss.h>
+#include <xrpl/protocol/STArray.h>
+#include <xrpl/protocol/jss.h>
 
 #include <cstdint>
 #include <memory>
@@ -59,6 +61,8 @@ public:
         std::string destinationAccount;
         std::string ledgerHash;
         uint32_t ledgerIndex{};
+        std::optional<boost::json::array> credentials;
+
         // validated should be sent via framework
         bool validated = true;
     };
@@ -71,6 +75,7 @@ public:
         std::string destinationAccount;
         std::optional<std::string> ledgerHash;
         std::optional<uint32_t> ledgerIndex;
+        std::optional<boost::json::array> credentials;
     };
 
     using Result = HandlerReturnType<Output>;
@@ -95,10 +100,11 @@ public:
     spec([[maybe_unused]] uint32_t apiVersion)
     {
         static auto const rpcSpec = RpcSpec{
-            {JS(source_account), validation::Required{}, validation::AccountValidator},
-            {JS(destination_account), validation::Required{}, validation::AccountValidator},
-            {JS(ledger_hash), validation::Uint256HexStringValidator},
-            {JS(ledger_index), validation::LedgerIndexValidator},
+            {JS(source_account), validation::Required{}, validation::CustomValidators::AccountValidator},
+            {JS(destination_account), validation::Required{}, validation::CustomValidators::AccountValidator},
+            {JS(ledger_hash), validation::CustomValidators::Uint256HexStringValidator},
+            {JS(ledger_index), validation::CustomValidators::LedgerIndexValidator},
+            {JS(credentials), validation::Type<boost::json::array>{}, validation::Hex256ItemType()}
         };
 
         return rpcSpec;

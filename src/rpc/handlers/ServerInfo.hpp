@@ -21,23 +21,25 @@
 
 #include "data/BackendInterface.hpp"
 #include "data/DBHelpers.hpp"
-#include "main/Build.hpp"
+#include "feed/SubscriptionManagerInterface.hpp"
 #include "rpc/Errors.hpp"
 #include "rpc/JS.hpp"
 #include "rpc/common/Specs.hpp"
 #include "rpc/common/Types.hpp"
+#include "util/Assert.hpp"
+#include "util/build/Build.hpp"
 
 #include <boost/json/conversion.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/value.hpp>
 #include <fmt/core.h>
-#include <ripple/basics/chrono.h>
-#include <ripple/basics/strHex.h>
-#include <ripple/protocol/BuildInfo.h>
-#include <ripple/protocol/ErrorCodes.h>
-#include <ripple/protocol/Fees.h>
-#include <ripple/protocol/Protocol.h>
-#include <ripple/protocol/jss.h>
+#include <xrpl/basics/chrono.h>
+#include <xrpl/basics/strHex.h>
+#include <xrpl/protocol/BuildInfo.h>
+#include <xrpl/protocol/ErrorCodes.h>
+#include <xrpl/protocol/Fees.h>
+#include <xrpl/protocol/Protocol.h>
+#include <xrpl/protocol/jss.h>
 
 #include <chrono>
 #include <cstddef>
@@ -51,9 +53,6 @@ namespace etl {
 class ETLService;
 class LoadBalancer;
 }  // namespace etl
-namespace feed {
-class SubscriptionManager;
-}  // namespace feed
 namespace rpc {
 class Counters;
 }  // namespace rpc
@@ -63,17 +62,16 @@ namespace rpc {
 /**
  * @brief Contains common functionality for handling the `server_info` command
  *
- * @tparam SubscriptionManagerType The type of the subscription manager
  * @tparam LoadBalancerType The type of the load balancer
  * @tparam ETLServiceType The type of the ETL service
  * @tparam CountersType The type of the counters
  */
-template <typename SubscriptionManagerType, typename LoadBalancerType, typename ETLServiceType, typename CountersType>
+template <typename LoadBalancerType, typename ETLServiceType, typename CountersType>
 class BaseServerInfoHandler {
     static constexpr auto BACKEND_COUNTERS_KEY = "backend_counters";
 
     std::shared_ptr<BackendInterface> backend_;
-    std::shared_ptr<SubscriptionManagerType> subscriptions_;
+    std::shared_ptr<feed::SubscriptionManagerInterface> subscriptions_;
     std::shared_ptr<LoadBalancerType> balancer_;
     std::shared_ptr<ETLServiceType const> etl_;
     std::reference_wrapper<CountersType const> counters_;
@@ -90,10 +88,10 @@ public:
      * @brief A struct to hold the admin section of the output
      */
     struct AdminSection {
-        boost::json::object counters = {};
-        std::optional<boost::json::object> backendCounters = {};
-        boost::json::object subscriptions = {};
-        boost::json::object etl = {};
+        boost::json::object counters;
+        std::optional<boost::json::object> backendCounters;
+        boost::json::object subscriptions;
+        boost::json::object etl;
     };
 
     /**
@@ -101,7 +99,7 @@ public:
      */
     struct ValidatedLedgerSection {
         uint32_t age = 0;
-        std::string hash = {};
+        std::string hash;
         ripple::LedgerIndex seq = {};
         std::optional<ripple::Fees> fees = std::nullopt;
     };
@@ -111,6 +109,7 @@ public:
      */
     struct CacheSection {
         std::size_t size = 0;
+        bool isEnabled = false;
         bool isFull = false;
         ripple::LedgerIndex latestLedgerSeq = {};
         float objectHitRate = 1.0;
@@ -122,16 +121,17 @@ public:
      */
     struct InfoSection {
         std::optional<AdminSection> adminSection = std::nullopt;
-        std::string completeLedgers = {};
+        std::string completeLedgers;
         uint32_t loadFactor = 1u;
         std::chrono::time_point<std::chrono::system_clock> time = std::chrono::system_clock::now();
         std::chrono::seconds uptime = {};
-        std::string clioVersion = Build::getClioVersionString();
+        std::string clioVersion = util::build::getClioVersionString();
         std::string xrplVersion = ripple::BuildInfo::getVersionString();
         std::optional<boost::json::object> rippledInfo = std::nullopt;
         ValidatedLedgerSection validatedLedger = {};
         CacheSection cache = {};
         bool isAmendmentBlocked = false;
+        bool isCorruptionDetected = false;
     };
 
     /**
@@ -157,7 +157,7 @@ public:
      */
     BaseServerInfoHandler(
         std::shared_ptr<BackendInterface> const& backend,
-        std::shared_ptr<SubscriptionManagerType> const& subscriptions,
+        std::shared_ptr<feed::SubscriptionManagerInterface> const& subscriptions,
         std::shared_ptr<LoadBalancerType> const& balancer,
         std::shared_ptr<ETLServiceType const> const& etl,
         CountersType const& counters
@@ -197,6 +197,8 @@ public:
         using namespace std::chrono;
 
         auto const range = backend_->fetchLedgerRange();
+        ASSERT(range.has_value(), "ServerInfo's ledger range must be available");
+
         auto const lgrInfo = backend_->fetchLedgerBySequence(range->maxSequence, ctx.yield);
         if (not lgrInfo.has_value())
             return Error{Status{RippledError::rpcINTERNAL}};
@@ -223,7 +225,7 @@ public:
         }
 
         auto const serverInfoRippled =
-            balancer_->forwardToRippled({{"command", "server_info"}}, ctx.clientIp, ctx.yield);
+            balancer_->forwardToRippled({{"command", "server_info"}}, ctx.clientIp, ctx.isAdmin, ctx.yield);
 
         if (serverInfoRippled && !serverInfoRippled->contains(JS(error))) {
             if (serverInfoRippled->contains(JS(result)) &&
@@ -241,8 +243,10 @@ public:
         output.info.cache.latestLedgerSeq = backend_->cache().latestLedgerSequence();
         output.info.cache.objectHitRate = backend_->cache().getObjectHitRate();
         output.info.cache.successorHitRate = backend_->cache().getSuccessorHitRate();
+        output.info.cache.isEnabled = not backend_->cache().isDisabled();
         output.info.uptime = counters_.get().uptime();
         output.info.isAmendmentBlocked = etl_->isAmendmentBlocked();
+        output.info.isCorruptionDetected = etl_->isCorruptionDetected();
 
         return output;
     }
@@ -278,6 +282,9 @@ private:
 
         if (info.isAmendmentBlocked)
             jv.as_object()[JS(amendment_blocked)] = true;
+
+        if (info.isCorruptionDetected)
+            jv.as_object()["corruption_detected"] = true;
 
         if (info.rippledInfo) {
             auto const& rippledInfo = info.rippledInfo.value();
@@ -320,6 +327,7 @@ private:
     {
         jv = {
             {"size", cache.size},
+            {"is_enabled", cache.isEnabled},
             {"is_full", cache.isFull},
             {"latest_ledger_seq", cache.latestLedgerSeq},
             {"object_hit_rate", cache.objectHitRate},
@@ -344,7 +352,6 @@ private:
  *
  * For more details see: https://xrpl.org/server_info-clio.html
  */
-using ServerInfoHandler =
-    BaseServerInfoHandler<feed::SubscriptionManager, etl::LoadBalancer, etl::ETLService, Counters>;
+using ServerInfoHandler = BaseServerInfoHandler<etl::LoadBalancer, etl::ETLService, Counters>;
 
 }  // namespace rpc

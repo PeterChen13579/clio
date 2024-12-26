@@ -22,13 +22,14 @@
 #include "data/BackendInterface.hpp"
 #include "feed/Types.hpp"
 #include "feed/impl/SingleFeedBase.hpp"
+#include "util/async/AnyExecutionContext.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/spawn.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/serialize.hpp>
-#include <ripple/protocol/Fees.h>
-#include <ripple/protocol/LedgerHeader.h>
+#include <xrpl/protocol/Fees.h>
+#include <xrpl/protocol/LedgerHeader.h>
 
 #include <cstdint>
 #include <memory>
@@ -46,9 +47,9 @@ class LedgerFeed : public SingleFeedBase {
 public:
     /**
      * @brief Construct a new Ledger Feed object
-     * @param ioContext The actual publish will be called in the strand of this.
+     * @param executionCtx The actual publish will be called in the strand of this.
      */
-    LedgerFeed(boost::asio::io_context& ioContext) : SingleFeedBase(ioContext, "ledger")
+    LedgerFeed(util::async::AnyExecutionContext& executionCtx) : SingleFeedBase(executionCtx, "ledger")
     {
     }
 
