@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of clio: https://github.com/XRPLF/clio
-    Copyright (c) 2024, the clio developers.
+    Copyright (c) 2025, the clio developers.
 
     Permission to use, copy, modify, and distribute this software for any
     purpose with or without fee is hereby granted, provided that the above
@@ -19,15 +19,20 @@
 
 #pragma once
 
-#include "migration/cassandra/impl/FullTableScanner.hpp"
-#include "migration/cassandra/impl/ObjectsAdapter.hpp"
-#include "migration/cassandra/impl/SuccessorAdaptor.hpp"
-#include "migration/cassandra/impl/TransactionsAdapter.hpp"
+#include "migration/cassandra/CassandraMigrationBackend.hpp"
+#include "util/newconfig/ObjectView.hpp"
 
-namespace migration::cassandra::impl {
+#include <memory>
 
-using ObjectsScanner = impl::FullTableScanner<impl::ObjectsAdapter>;
-using TransactionsScanner = impl::FullTableScanner<impl::TransactionsAdapter>;
-using SuccessorScanner = impl::FullTableScanner<impl::SuccessorAdapter>;
+/**
+ * @brief Successor table migrator. We will be creating a new table that is w
+ */
+struct SuccessorMigrator {
+    static constexpr char const* kNAME = "SuccessorMigrator";
+    static constexpr char const* kDESCRIPTION = "The migrator for successor table";
 
-}  // namespace migration::cassandra::impl
+    using Backend = migration::cassandra::CassandraMigrationBackend;
+
+    static void
+    runMigration(std::shared_ptr<Backend> const& backend, util::config::ObjectView const& config);
+};

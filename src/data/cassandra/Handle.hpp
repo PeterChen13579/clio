@@ -19,7 +19,6 @@
 
 #pragma once
 
-#include "data/cassandra/Error.hpp"
 #include "data/cassandra/Types.hpp"
 #include "data/cassandra/impl/Batch.hpp"
 #include "data/cassandra/impl/Cluster.hpp"

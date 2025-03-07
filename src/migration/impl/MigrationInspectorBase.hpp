@@ -22,6 +22,7 @@
 #include "migration/MigrationInspectorInterface.hpp"
 #include "migration/MigratiorStatus.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <ranges>
 #include <string>

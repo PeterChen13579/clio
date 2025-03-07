@@ -23,7 +23,6 @@
 
 #include <concepts>
 #include <tuple>
-#include <type_traits>
 
 namespace migration::cassandra::impl {
 // Define the concept for a class like TableObjectsDesc

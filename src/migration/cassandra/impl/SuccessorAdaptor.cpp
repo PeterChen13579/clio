@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of clio: https://github.com/XRPLF/clio
-    Copyright (c) 2024, the clio developers.
+    Copyright (c) 2025, the clio developers.
 
     Permission to use, copy, modify, and distribute this software for any
     purpose with or without fee is hereby granted, provided that the above
@@ -17,17 +17,22 @@
 */
 //==============================================================================
 
-#pragma once
-
-#include "migration/cassandra/impl/FullTableScanner.hpp"
-#include "migration/cassandra/impl/ObjectsAdapter.hpp"
 #include "migration/cassandra/impl/SuccessorAdaptor.hpp"
-#include "migration/cassandra/impl/TransactionsAdapter.hpp"
+
+#include "util/Assert.hpp"
+
+#include <string>
 
 namespace migration::cassandra::impl {
 
-using ObjectsScanner = impl::FullTableScanner<impl::ObjectsAdapter>;
-using TransactionsScanner = impl::FullTableScanner<impl::TransactionsAdapter>;
-using SuccessorScanner = impl::FullTableScanner<impl::SuccessorAdapter>;
+void
+SuccessorAdapter::onRowRead(SuccessorTable::Row const& row)
+{
+    auto const& [key, ledgerSeq, next] = row;
+    ASSERT(!key.empty() && !next.empty(), "key and next blob can not be empty in successor table");
+    auto const k = std::string(std::begin(key), std::end(key));
+    auto const n = std::string(std::begin(next), std::end(next));
+    onSuccessorRead_(k, ledgerSeq, n);
+}
 
 }  // namespace migration::cassandra::impl

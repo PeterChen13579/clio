@@ -20,14 +20,15 @@
 #pragma once
 
 #include "data/CassandraBackend.hpp"
+#include "data/cassandra/Schema.hpp"
 #include "data/cassandra/SettingsProvider.hpp"
 #include "data/cassandra/Types.hpp"
-#include "migration/MigratiorStatus.hpp"
 #include "migration/cassandra/impl/CassandraMigrationSchema.hpp"
 #include "migration/cassandra/impl/Spec.hpp"
 #include "util/log/Logger.hpp"
 
 #include <boost/asio/spawn.hpp>
+#include <fmt/core.h>
 
 #include <cstdint>
 #include <string>
@@ -103,6 +104,22 @@ public:
              )) {
             callback(row);
         }
+    }
+
+    void
+    writeNewSuccessor(std::string const& key, std::uint32_t seq, std::string const& next)
+    {
+        static auto const kINSERT_NEW_SUCCESSOR = [this] {
+            return handle_.prepare(fmt::format(
+                R"(
+                INSERT INTO {} 
+                       (key, seq, next)
+                VALUES (?, ?, ?)
+                )",
+                data::cassandra::qualifiedTableName(settingsProvider_, "successor_new")
+            ));
+        }();
+        executor_.writeSync(kINSERT_NEW_SUCCESSOR.bind(data::cassandra::Text(key), seq, data::cassandra::Text(next)));
     }
 };
 }  // namespace migration::cassandra

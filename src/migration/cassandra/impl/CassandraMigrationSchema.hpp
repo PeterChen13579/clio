@@ -84,13 +84,32 @@ public:
     data::cassandra::PreparedStatement const&
     getPreparedInsertMigratedMigrator(data::cassandra::Handle const& handler)
     {
-        static auto kPREPARED = handler.prepare(fmt::format(
+        static auto const kPREPARED = handler.prepare(fmt::format(
             R"(
             INSERT INTO {} 
                    (migrator_name, status)
             VALUES (?, ?)
             )",
             data::cassandra::qualifiedTableName<SettingsProviderType>(settingsProvider_.get(), "migrator_status")
+        ));
+        return kPREPARED;
+    }
+
+    data::cassandra::PreparedStatement const&
+    getPreparedInsertNewSuccessorTable(data::cassandra::Handle const& handler)
+    {
+        static auto const kPREPARED = handler.prepare(fmt::format(
+            R"(
+                CREATE TABLE IF NOT EXISTS {}
+                       (     
+                         key blob,
+                         seq bigint, 
+                        next blob, 
+                     PRIMARY KEY (key, seq) 
+                       ) 
+                    WITH CLUSTERING ORDER BY (seq DESC)
+                 )",
+            data::cassandra::qualifiedTableName<SettingsProviderType>(settingsProvider_.get(), "successor_new")
         ));
         return kPREPARED;
     }
