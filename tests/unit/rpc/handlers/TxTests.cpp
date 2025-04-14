@@ -179,7 +179,7 @@ TEST_F(RPCTxTest, InvalidBinaryV1)
 
     auto const rawETLPtr = dynamic_cast<MockETLService*>(mockETLServicePtr_.get());
     ASSERT_NE(rawETLPtr, nullptr);
-    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID=0}));
+    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID = 0}));
 
     runSpawn([this](auto yield) {
         auto const handler = AnyHandler{TestTxHandler{backend_, mockETLServicePtr_}};
@@ -246,7 +246,7 @@ TEST_F(RPCTxTest, TxnNotFound)
 
     auto const rawETLPtr = dynamic_cast<MockETLService*>(mockETLServicePtr_.get());
     ASSERT_NE(rawETLPtr, nullptr);
-    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID=0}));
+    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID = 0}));
 
     runSpawn([this](auto yield) {
         auto const handler = AnyHandler{TestTxHandler{backend_, mockETLServicePtr_}};
@@ -274,7 +274,7 @@ TEST_F(RPCTxTest, TxnNotFoundInGivenRangeSearchAllFalse)
 
     auto const rawETLPtr = dynamic_cast<MockETLService*>(mockETLServicePtr_.get());
     ASSERT_NE(rawETLPtr, nullptr);
-    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID=0}));
+    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID = 0}));
 
     runSpawn([this](auto yield) {
         auto const handler = AnyHandler{TestTxHandler{backend_, mockETLServicePtr_}};
@@ -305,7 +305,7 @@ TEST_F(RPCTxTest, TxnNotFoundInGivenRangeSearchAllTrue)
 
     auto const rawETLPtr = dynamic_cast<MockETLService*>(mockETLServicePtr_.get());
     ASSERT_NE(rawETLPtr, nullptr);
-    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID=0}));
+    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID = 0}));
 
     runSpawn([this](auto yield) {
         auto const handler = AnyHandler{TestTxHandler{backend_, mockETLServicePtr_}};
@@ -372,7 +372,7 @@ TEST_F(RPCTxTest, DefaultParameter_API_v1)
 
     auto const rawETLPtr = dynamic_cast<MockETLService*>(mockETLServicePtr_.get());
     ASSERT_NE(rawETLPtr, nullptr);
-    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID=0}));
+    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID = 0}));
 
     runSpawn([this](auto yield) {
         auto const handler = AnyHandler{TestTxHandler{backend_, mockETLServicePtr_}};
@@ -402,7 +402,7 @@ TEST_F(RPCTxTest, PaymentTx_API_v1)
 
     auto const rawETLPtr = dynamic_cast<MockETLService*>(mockETLServicePtr_.get());
     ASSERT_NE(rawETLPtr, nullptr);
-    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID=0}));
+    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID = 0}));
 
     runSpawn([this](auto yield) {
         auto const handler = AnyHandler{TestTxHandler{backend_, mockETLServicePtr_}};
@@ -433,7 +433,7 @@ TEST_F(RPCTxTest, PaymentTx_API_v2)
 
     auto const rawETLPtr = dynamic_cast<MockETLService*>(mockETLServicePtr_.get());
     ASSERT_NE(rawETLPtr, nullptr);
-    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID=0}));
+    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID = 0}));
 
     runSpawn([this](auto yield) {
         auto const handler = AnyHandler{TestTxHandler{backend_, mockETLServicePtr_}};
@@ -467,7 +467,7 @@ TEST_F(RPCTxTest, DefaultParameter_API_v2)
 
     auto const rawETLPtr = dynamic_cast<MockETLService*>(mockETLServicePtr_.get());
     ASSERT_NE(rawETLPtr, nullptr);
-    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID=0}));
+    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID = 0}));
 
     runSpawn([this](auto yield) {
         auto const handler = AnyHandler{TestTxHandler{backend_, mockETLServicePtr_}};
@@ -508,7 +508,7 @@ TEST_F(RPCTxTest, ReturnBinary)
 
     auto const rawETLPtr = dynamic_cast<MockETLService*>(mockETLServicePtr_.get());
     ASSERT_NE(rawETLPtr, nullptr);
-    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID=0}));
+    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID = 0}));
 
     runSpawn([this](auto yield) {
         auto const handler = AnyHandler{TestTxHandler{backend_, mockETLServicePtr_}};
@@ -639,7 +639,7 @@ TEST_F(RPCTxTest, MintNFT)
 
     auto const rawETLPtr = dynamic_cast<MockETLService*>(mockETLServicePtr_.get());
     ASSERT_NE(rawETLPtr, nullptr);
-    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID=0}));
+    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID = 0}));
 
     runSpawn([this](auto yield) {
         auto const handler = AnyHandler{TestTxHandler{backend_, mockETLServicePtr_}};
@@ -666,7 +666,7 @@ TEST_F(RPCTxTest, NFTAcceptOffer)
 
     auto const rawETLPtr = dynamic_cast<MockETLService*>(mockETLServicePtr_.get());
     ASSERT_NE(rawETLPtr, nullptr);
-    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID=0}));
+    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID = 0}));
 
     runSpawn([this](auto yield) {
         auto const handler = AnyHandler{TestTxHandler{backend_, mockETLServicePtr_}};
@@ -694,7 +694,7 @@ TEST_F(RPCTxTest, NFTCancelOffer)
 
     auto const rawETLPtr = dynamic_cast<MockETLService*>(mockETLServicePtr_.get());
     ASSERT_NE(rawETLPtr, nullptr);
-    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID=0}));
+    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID = 0}));
 
     runSpawn([this, &ids](auto yield) {
         auto const handler = AnyHandler{TestTxHandler{backend_, mockETLServicePtr_}};
@@ -729,7 +729,7 @@ TEST_F(RPCTxTest, NFTCreateOffer)
 
     auto const rawETLPtr = dynamic_cast<MockETLService*>(mockETLServicePtr_.get());
     ASSERT_NE(rawETLPtr, nullptr);
-    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID=0}));
+    EXPECT_CALL(*rawETLPtr, getETLState).WillOnce(Return(etl::ETLState{.networkID = 0}));
 
     runSpawn([this](auto yield) {
         auto const handler = AnyHandler{TestTxHandler{backend_, mockETLServicePtr_}};
