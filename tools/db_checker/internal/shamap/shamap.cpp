@@ -53,24 +53,18 @@ SHAMapAddStateItem(SHAMap m, char const* key, char const* value, unsigned valueS
 void
 SHAMapAddTxItem(SHAMap m, char const* tx, unsigned txSize, char const* metaData, unsigned metaDataSize)
 {
-    try {
-        SHAMapWrapper* w = (SHAMapWrapper*)m;
-        ripple::Slice slice1{tx, txSize};
-        ripple::Slice slice2{metaData, metaDataSize};
-
-        // if the transaction (value1) type is not supported or corrupted, it will cause a crash
-        ripple::SerialIter sit(ripple::Slice{tx, txSize});
-        ripple::STTx sttx{sit};
-
-        ripple::Serializer s(txSize + metaDataSize + 16);
-        s.addVL(slice1);
-        s.addVL(slice2);
-        w->map.addItem(
-            ripple::SHAMapNodeType::tnTRANSACTION_MD, ripple::make_shamapitem(sttx.getTransactionID(), s.slice())
-        );
-    } catch (std::runtime_error const& e) {
-        std::cerr << "Caught exception: " << e.what() << std::endl;        
-    }
+    SHAMapWrapper* w = (SHAMapWrapper*)m;
+    ripple::Slice slice1{tx, txSize};
+    ripple::Slice slice2{metaData, metaDataSize};
+    // if the transaction (tx) type is not supported or corrupted, it will cause a crash
+    ripple::SerialIter sit(ripple::Slice{tx, txSize});
+    ripple::STTx sttx{sit};
+    ripple::Serializer s(txSize + metaDataSize + 16);
+    s.addVL(slice1);
+    s.addVL(slice2);
+    w->map.addItem(
+        ripple::SHAMapNodeType::tnTRANSACTION_MD, ripple::make_shamapitem(sttx.getTransactionID(), s.slice())
+    );
 }
 
 void

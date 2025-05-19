@@ -11,7 +11,6 @@ import (
 )
 
 func TraverseTxHashFromDB(session *gocql.Session, ledgerIndex uint64, skipSha bool, skipAccountTxCheck bool, skipNFT bool, fixNFTUri bool, skipDiff bool) string {
-
 	var hashes [][]byte
 	scanner := session.Query("select hash from ledger_transactions where ledger_sequence = ?", ledgerIndex).Iter().Scanner()
 	for scanner.Next() {

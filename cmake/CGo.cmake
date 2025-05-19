@@ -88,13 +88,14 @@ macro (cgo_fetch_cflags_and_ldflags)
     "-lSHAMap"
     "-lfmt"
     "-lclio_etl"
-    "-lxrpl_core"
+    "-lxrpl"
     "-led25519"
     "-lsecp256k1"
     "-lssl"
     "-lboost_thread"
     "-lcrypto"
     "-ldl"
+    "-lxxhash"
   )
   list(
     APPEND

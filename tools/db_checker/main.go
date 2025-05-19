@@ -62,10 +62,9 @@ var (
 	ledgerHash    = kingpin.Flag("ledgerHash", "Whether to do ledger_hash table validation").Default("false").Bool()
 	ledgerHashFix = kingpin.Flag("ledgerHashFix", "Whether to do ledger_hash table validation and fix it in place").Default("false").Bool()
 
-	clusterTimeout        = kingpin.Flag("timeout", "Maximum duration for query execution in millisecond").Short('t').Default("90000").Int()
-	clusterNumConnections = kingpin.Flag("cluster-number-of-connections", "Number of connections per host per session (in our case, per thread)").Short('b').Default("1").Int()
-	clusterCQLVersion     = kingpin.Flag("cql-version", "The CQL version to use").Short('l').Default("3.0.0").String()
-	keyspace              = kingpin.Flag("keyspace", "Keyspace to use").Short('k').Default("clio_fh").String()
+	clusterTimeout    = kingpin.Flag("timeout", "Maximum duration for query execution in millisecond").Short('t').Default("90000").Int()
+	clusterCQLVersion = kingpin.Flag("cql-version", "The CQL version to use").Short('l').Default("3.0.0").String()
+	keyspace          = kingpin.Flag("keyspace", "Keyspace to use").Short('k').Default("clio_fh").String()
 
 	userName = kingpin.Flag("username", "Username to use when connecting to the cluster").String()
 	password = kingpin.Flag("password", "Password to use when connecting to the cluster").String()
@@ -83,10 +82,11 @@ func main() {
 	hosts := strings.Split(*clusterHosts, ",")
 	cluster := gocql.NewCluster(hosts...)
 	cluster.Timeout = time.Duration(*clusterTimeout * 1000 * 1000)
-	cluster.NumConns = *clusterNumConnections
+	cluster.NumConns = 1
 	cluster.CQLVersion = *clusterCQLVersion
 	cluster.Keyspace = *keyspace
 
+	// Limit to a single connection during authentication to avoid concurrent authentication attempts.
 	if *userName != "" {
 		cluster.Authenticator = gocql.PasswordAuthenticator{
 			Username: *userName,
@@ -119,6 +119,7 @@ func main() {
 
 	//start checking from ledgerIndex, stop when the process ends
 	mismatchCh := make(chan uint64)
+	cluster.NumConns = 50
 
 	if *objects {
 		go func() {
@@ -128,7 +129,6 @@ func main() {
 				log.Fatal(err)
 			}
 			defer session.Close()
-			cluster.NumConns = 50 // max number of connections possible
 			seq := checkingStatesFromLedger(session, *fromLedgerIdx, *toLedgerIdx, *cursors)
 			mismatchCh <- seq
 		}()
@@ -140,12 +140,7 @@ func main() {
 				log.Fatal(err)
 			}
 			defer session.Close()
-			cluster.NumConns = 50 // max number of connections possible
 			mismatch := checkingTransactionsFromLedger(session, *fromLedgerIdx, *toLedgerIdx, *step, *txSkipSha, *txSkipAccount, *txSkipNFT, *NFTUriFix, !*txDiff)
-			mismatchCh <- mismatch
-		}()
-	} else if *ledgerHash || *ledgerHashFix {
-		go func() {
 			log.Printf("Checking ledger hash from range: %d to %d\n", *fromLedgerIdx, *toLedgerIdx)
 			mismatch := checkingLedgerHash(cluster, *fromLedgerIdx, *toLedgerIdx, *step, *ledgerHashFix)
 			mismatchCh <- mismatch
@@ -158,7 +153,6 @@ func main() {
 				log.Fatal(err)
 			}
 			defer session.Close()
-			cluster.NumConns = 50 // max number of connections possible
 			mismatch := checkingDiff(session, *fromLedgerIdx, *toLedgerIdx, *cursors)
 			mismatchCh <- mismatch
 		}()

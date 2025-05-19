@@ -175,7 +175,6 @@ func checkingStatesFromLedger(session *gocql.Session, startLedgerIndex uint64, e
 		cursor, _ := getLedgerStatesCursor(session, cursorsCount, ledgerIndex)
 		statesMap := shamap.MakeSHAMapState()
 		ledgerHashFromMap := LoadStatesFromCursors(session, &statesMap, ledgerIndex, cursor)
-
 		statesMap.Free()
 		ledgerHashFromHeader, _ := getHashesFromLedgerHeader(session, ledgerIndex)
 

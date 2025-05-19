@@ -15,6 +15,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <exception>
+#include <iostream>
+#include <stdexcept>
 
 void
 GetStatesHashFromLedgerHeader(char* ledgerHeaderBlob, int size, char* hash)
