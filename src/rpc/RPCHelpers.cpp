@@ -78,6 +78,9 @@
 #include <ripple/protocol/nftPageMask.h>
 #include <ripple/protocol/tokens.h>
 
+#include <xrpl/json/json_reader.h>
+#include <xrpl/json/json_value.h>
+
 #include <algorithm>
 #include <array>
 #include <cassert>

@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <vector>
 
 #if BOOST_OS_LINUX
 #include <sys/mman.h>

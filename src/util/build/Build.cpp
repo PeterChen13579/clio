@@ -23,7 +23,7 @@
 
 namespace util::build {
 
-static constexpr char versionString[] = "20241217153517-develop-fc3e60f1";
+static constexpr char versionString[] = "20250518201300-DataVerify-ac2131bb";
 
 std::string const&
 getClioVersionString()

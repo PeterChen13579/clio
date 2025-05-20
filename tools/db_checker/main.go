@@ -142,7 +142,6 @@ func main() {
 			defer session.Close()
 			mismatch := checkingTransactionsFromLedger(session, *fromLedgerIdx, *toLedgerIdx, *step, *txSkipSha, *txSkipAccount, *txSkipNFT, *NFTUriFix, !*txDiff)
 			log.Printf("Checking ledger hash from range: %d to %d\n", *fromLedgerIdx, *toLedgerIdx)
-			mismatch := checkingLedgerHash(cluster, *fromLedgerIdx, *toLedgerIdx, *step, *ledgerHashFix)
 			mismatchCh <- mismatch
 		}()
 	} else if *diff {
