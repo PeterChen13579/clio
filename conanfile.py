@@ -32,8 +32,8 @@ class ClioConan(ConanFile):
         'openssl/1.1.1v',
         'xrpl/2.5.0',
         'zlib/1.3.1',
-        'openssl/1.1.1u',
-        'xrpl/2.4.0-b1@clio/permission_domains',
+        'openssl/1.1.1v',
+        'xrpl/2.5.0',
         'libbacktrace/cci.20210118'
             ]
 
