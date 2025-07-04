@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of clio: https://github.com/XRPLF/clio
-    Copyright (c) 2022-2024, the clio developers.
+    Copyright (c) 2024, the clio developers.
 
     Permission to use, copy, modify, and distribute this software for any
     purpose with or without fee is hereby granted, provided that the above
@@ -42,8 +42,8 @@ namespace migration::cassandra::impl {
  */
 struct TableObjectsDesc {
     using Row = std::tuple<ripple::uint256, std::uint32_t, data::Blob>;
-    static constexpr char const* PARTITION_KEY = "key";
-    static constexpr char const* TABLE_NAME = "objects";
+    static constexpr char const* kPARTITION_KEY = "key";
+    static constexpr char const* kTABLE_NAME = "objects";
 };
 
 /**

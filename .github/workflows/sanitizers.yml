@@ -1,0 +1,58 @@
+name: Run tests with sanitizers
+
+on:
+  schedule:
+    - cron: "0 4 * * 1-5"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/sanitizers.yml
+
+      - .github/workflows/build_and_test.yml
+      - .github/workflows/build_impl.yml
+      - .github/workflows/test_impl.yml
+
+      - ".github/actions/**"
+      - "!.github/actions/build_docker_image/**"
+      - "!.github/actions/create_issue/**"
+      - .github/scripts/execute-tests-under-sanitizer
+
+      - CMakeLists.txt
+      - conanfile.py
+      - conan.lock
+      - "cmake/**"
+      # We don't run sanitizer on code change, because it takes too long
+      # - "src/**"
+      # - "tests/**"
+
+concurrency:
+  # Only cancel in-progress jobs or runs for the current workflow - matches against branch & tags
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and Test
+
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ["gcc", "clang"]
+        sanitizer_ext: [".asan", ".tsan", ".ubsan"]
+        exclude:
+          # Currently, clang.tsan unit tests hang
+          - compiler: clang
+            sanitizer_ext: .tsan
+
+    uses: ./.github/workflows/build_and_test.yml
+    with:
+      runs_on: heavy
+      container: '{ "image": "ghcr.io/xrplf/clio-ci:latest" }'
+      disable_cache: true
+      conan_profile: ${{ matrix.compiler }}${{ matrix.sanitizer_ext }}
+      build_type: Release
+      static: false
+      run_unit_tests: true
+      run_integration_tests: false
+      upload_clio_server: false
+      targets: clio_tests clio_integration_tests

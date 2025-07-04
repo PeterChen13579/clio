@@ -21,9 +21,9 @@
 #include "util/LoggerFixtures.hpp"
 #include "util/NameGenerator.hpp"
 #include "util/Taggable.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
-#include "util/newconfig/ConfigValue.hpp"
-#include "util/newconfig/Types.hpp"
+#include "util/config/ConfigDefinition.hpp"
+#include "util/config/ConfigValue.hpp"
+#include "util/config/Types.hpp"
 #include "web/impl/ErrorHandling.hpp"
 #include "web/interface/ConnectionBaseMock.hpp"
 
@@ -42,6 +42,7 @@ using namespace web;
 using namespace util::config;
 
 struct ErrorHandlingTests : NoLoggerFixture {
+protected:
     util::TagDecoratorFactory tagFactory_{ClioConfigDefinition{
         {"log_tag_style", ConfigValue{ConfigType::String}.defaultValue("uint")},
     }};
@@ -120,7 +121,7 @@ INSTANTIATE_TEST_CASE_P(
                 {"request", {{"id", 1}, {"api_version", 2}}}}}}
          }}
     ),
-    tests::util::NameGenerator
+    tests::util::kNAME_GENERATOR
 );
 
 struct ErrorHandlingSendErrorTestBundle {
@@ -151,53 +152,53 @@ INSTANTIATE_TEST_CASE_P(
             "UpgradedConnection",
             true,
             rpc::Status{rpc::RippledError::rpcTOO_BUSY},
-            R"({"error":"tooBusy","error_code":9,"error_message":"The server is too busy to help you now.","status":"error","type":"response"})",
+            R"JSON({"error":"tooBusy","error_code":9,"error_message":"The server is too busy to help you now.","status":"error","type":"response"})JSON",
             boost::beast::http::status::ok
         },
         ErrorHandlingSendErrorTestBundle{
             "NotUpgradedConnection_InvalidApiVersion",
             false,
-            rpc::Status{rpc::ClioError::rpcINVALID_API_VERSION},
+            rpc::Status{rpc::ClioError::RpcInvalidApiVersion},
             "invalid_API_version",
             boost::beast::http::status::bad_request
         },
         ErrorHandlingSendErrorTestBundle{
             "NotUpgradedConnection_CommandIsMissing",
             false,
-            rpc::Status{rpc::ClioError::rpcCOMMAND_IS_MISSING},
+            rpc::Status{rpc::ClioError::RpcCommandIsMissing},
             "Null method",
             boost::beast::http::status::bad_request
         },
         ErrorHandlingSendErrorTestBundle{
             "NotUpgradedConnection_CommandIsEmpty",
             false,
-            rpc::Status{rpc::ClioError::rpcCOMMAND_IS_EMPTY},
+            rpc::Status{rpc::ClioError::RpcCommandIsEmpty},
             "method is empty",
             boost::beast::http::status::bad_request
         },
         ErrorHandlingSendErrorTestBundle{
             "NotUpgradedConnection_CommandNotString",
             false,
-            rpc::Status{rpc::ClioError::rpcCOMMAND_NOT_STRING},
+            rpc::Status{rpc::ClioError::RpcCommandNotString},
             "method is not string",
             boost::beast::http::status::bad_request
         },
         ErrorHandlingSendErrorTestBundle{
-            "NotUpgradedConnection_ParamsUnparseable",
+            "NotUpgradedConnection_ParamsUnparsable",
             false,
-            rpc::Status{rpc::ClioError::rpcPARAMS_UNPARSEABLE},
-            "params unparseable",
+            rpc::Status{rpc::ClioError::RpcParamsUnparsable},
+            "params unparsable",
             boost::beast::http::status::bad_request
         },
         ErrorHandlingSendErrorTestBundle{
             "NotUpgradedConnection_RippledError",
             false,
             rpc::Status{rpc::RippledError::rpcTOO_BUSY},
-            R"({"result":{"error":"tooBusy","error_code":9,"error_message":"The server is too busy to help you now.","status":"error","type":"response"}})",
+            R"JSON({"result":{"error":"tooBusy","error_code":9,"error_message":"The server is too busy to help you now.","status":"error","type":"response"}})JSON",
             boost::beast::http::status::bad_request
         },
     }),
-    tests::util::NameGenerator
+    tests::util::kNAME_GENERATOR
 );
 
 TEST_F(ErrorHandlingTests, sendInternalError)
@@ -208,7 +209,7 @@ TEST_F(ErrorHandlingTests, sendInternalError)
         *connection_,
         send(
             std::string{
-                R"({"result":{"error":"internal","error_code":73,"error_message":"Internal error.","status":"error","type":"response"}})"
+                R"JSON({"result":{"error":"internal","error_code":73,"error_message":"Internal error.","status":"error","type":"response"}})JSON"
             },
             boost::beast::http::status::internal_server_error
         )
@@ -223,7 +224,7 @@ TEST_F(ErrorHandlingTests, sendNotReadyError)
         *connection_,
         send(
             std::string{
-                R"({"result":{"error":"notReady","error_code":13,"error_message":"Not ready to handle this request.","status":"error","type":"response"}})"
+                R"JSON({"result":{"error":"notReady","error_code":13,"error_message":"Not ready to handle this request.","status":"error","type":"response"}})JSON"
             },
             boost::beast::http::status::ok
         )
@@ -239,7 +240,7 @@ TEST_F(ErrorHandlingTests, sendTooBusyError_UpgradedConnection)
         *connection_,
         send(
             std::string{
-                R"({"error":"tooBusy","error_code":9,"error_message":"The server is too busy to help you now.","status":"error","type":"response"})"
+                R"JSON({"error":"tooBusy","error_code":9,"error_message":"The server is too busy to help you now.","status":"error","type":"response"})JSON"
             },
             boost::beast::http::status::ok
         )
@@ -255,7 +256,7 @@ TEST_F(ErrorHandlingTests, sendTooBusyError_NotUpgradedConnection)
         *connection_,
         send(
             std::string{
-                R"({"error":"tooBusy","error_code":9,"error_message":"The server is too busy to help you now.","status":"error","type":"response"})"
+                R"JSON({"error":"tooBusy","error_code":9,"error_message":"The server is too busy to help you now.","status":"error","type":"response"})JSON"
             },
             boost::beast::http::status::service_unavailable
         )
@@ -271,7 +272,7 @@ TEST_F(ErrorHandlingTests, sendJsonParsingError_UpgradedConnection)
         *connection_,
         send(
             std::string{
-                R"({"error":"badSyntax","error_code":1,"error_message":"Syntax error.","status":"error","type":"response"})"
+                R"JSON({"error":"badSyntax","error_code":1,"error_message":"Syntax error.","status":"error","type":"response"})JSON"
             },
             boost::beast::http::status::ok
         )

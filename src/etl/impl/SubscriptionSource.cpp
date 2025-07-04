@@ -35,7 +35,6 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/spawn.hpp>
 #include <boost/asio/strand.hpp>
-#include <boost/asio/use_future.hpp>
 #include <boost/beast/http/field.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/parse.hpp>
@@ -49,7 +48,6 @@
 #include <cstdint>
 #include <exception>
 #include <expected>
-#include <future>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -77,7 +75,7 @@ SubscriptionSource::SubscriptionSource(
     , subscriptions_(std::move(subscriptions))
     , strand_(boost::asio::make_strand(ioContext))
     , wsTimeout_(wsTimeout)
-    , retry_(util::makeRetryExponentialBackoff(retryDelay, RETRY_MAX_DELAY, strand_))
+    , retry_(util::makeRetryExponentialBackoff(retryDelay, kRETRY_MAX_DELAY, strand_))
     , onConnect_(std::move(onConnect))
     , onDisconnect_(std::move(onDisconnect))
     , onLedgerClosed_(std::move(onLedgerClosed))
@@ -90,15 +88,6 @@ SubscriptionSource::SubscriptionSource(
     wsConnectionBuilder_.addHeader({boost::beast::http::field::user_agent, "clio-client"})
         .addHeader({"X-User", "clio-client"})
         .setConnectionTimeout(wsTimeout_);
-}
-
-SubscriptionSource::~SubscriptionSource()
-{
-    stop();
-    retry_.cancel();
-
-    if (runFuture_.valid())
-        runFuture_.wait();
 }
 
 void
@@ -157,59 +146,53 @@ SubscriptionSource::validatedRange() const
 }
 
 void
-SubscriptionSource::stop()
+SubscriptionSource::stop(boost::asio::yield_context yield)
 {
     stop_ = true;
+    stopHelper_.asyncWaitForStop(yield);
 }
 
 void
 SubscriptionSource::subscribe()
 {
-    runFuture_ = boost::asio::spawn(
-        strand_,
-        [this, _ = boost::asio::make_work_guard(strand_)](boost::asio::yield_context yield) {
-            auto connection = wsConnectionBuilder_.connect(yield);
-            if (not connection) {
-                handleError(connection.error(), yield);
-                return;
-            }
-
+    boost::asio::spawn(strand_, [this, _ = boost::asio::make_work_guard(strand_)](boost::asio::yield_context yield) {
+        if (auto connection = wsConnectionBuilder_.connect(yield); connection) {
             wsConnection_ = std::move(connection).value();
+        } else {
+            handleError(connection.error(), yield);
+            return;
+        }
 
-            auto const& subscribeCommand = getSubscribeCommandJson();
-            auto const writeErrorOpt = wsConnection_->write(subscribeCommand, yield, wsTimeout_);
-            if (writeErrorOpt) {
-                handleError(writeErrorOpt.value(), yield);
+        auto const& subscribeCommand = getSubscribeCommandJson();
+
+        if (auto const writeErrorOpt = wsConnection_->write(subscribeCommand, yield, wsTimeout_); writeErrorOpt) {
+            handleError(writeErrorOpt.value(), yield);
+            return;
+        }
+
+        isConnected_ = true;
+        LOG(log_.info()) << "Connected";
+        onConnect_();
+
+        retry_.reset();
+
+        while (!stop_) {
+            auto const message = wsConnection_->read(yield, wsTimeout_);
+            if (not message) {
+                handleError(message.error(), yield);
                 return;
             }
 
-            isConnected_ = true;
-            LOG(log_.info()) << "Connected";
-            onConnect_();
-
-            retry_.reset();
-
-            while (!stop_) {
-                auto const message = wsConnection_->read(yield, wsTimeout_);
-                if (not message) {
-                    handleError(message.error(), yield);
-                    return;
-                }
-
-                auto const handleErrorOpt = handleMessage(message.value());
-                if (handleErrorOpt) {
-                    handleError(handleErrorOpt.value(), yield);
-                    return;
-                }
+            if (auto const handleErrorOpt = handleMessage(message.value()); handleErrorOpt) {
+                handleError(handleErrorOpt.value(), yield);
+                return;
             }
-            // Close the connection
-            handleError(
-                util::requests::RequestError{"Subscription source stopped", boost::asio::error::operation_aborted},
-                yield
-            );
-        },
-        boost::asio::use_future
-    );
+        }
+        // Close the connection
+        handleError(
+            util::requests::RequestError{"Subscription source stopped", boost::asio::error::operation_aborted}, yield
+        );
+    });
 }
 
 std::optional<util::requests::RequestError>
@@ -222,9 +205,9 @@ SubscriptionSource::handleMessage(std::string const& message)
         auto const object = raw.as_object();
         uint32_t ledgerIndex = 0;
 
-        static constexpr char const* const JS_LedgerClosed = "ledgerClosed";
-        static constexpr char const* const JS_ValidationReceived = "validationReceived";
-        static constexpr char const* const JS_ManifestReceived = "manifestReceived";
+        static constexpr auto kJS_LEDGER_CLOSED = "ledgerClosed";
+        static constexpr auto kJS_VALIDATION_RECEIVED = "validationReceived";
+        static constexpr auto kJS_MANIFEST_RECEIVED = "manifestReceived";
 
         if (object.contains(JS(result))) {
             auto const& result = object.at(JS(result)).as_object();
@@ -237,7 +220,7 @@ SubscriptionSource::handleMessage(std::string const& message)
             }
             LOG(log_.debug()) << "Received a message on ledger subscription stream. Message: " << object;
 
-        } else if (object.contains(JS(type)) && object.at(JS(type)) == JS_LedgerClosed) {
+        } else if (object.contains(JS(type)) && object.at(JS(type)) == kJS_LEDGER_CLOSED) {
             LOG(log_.debug()) << "Received a message of type 'ledgerClosed' on ledger subscription stream. Message: "
                               << object;
             if (object.contains(JS(ledger_index))) {
@@ -252,17 +235,17 @@ SubscriptionSource::handleMessage(std::string const& message)
 
         } else {
             if (isForwarding_) {
-                // Clio as rippled's proposed_transactions subscirber, will receive two jsons for each transaction
+                // Clio as rippled's proposed_transactions subscriber, will receive two jsons for each transaction
                 // 1 - Proposed transaction
                 // 2 - Validated transaction
                 // Only forward proposed transaction, validated transactions are sent by Clio itself
                 if (object.contains(JS(transaction)) and !object.contains(JS(meta))) {
                     LOG(log_.debug()) << "Forwarding proposed transaction: " << object;
                     subscriptions_->forwardProposedTransaction(object);
-                } else if (object.contains(JS(type)) && object.at(JS(type)) == JS_ValidationReceived) {
+                } else if (object.contains(JS(type)) && object.at(JS(type)) == kJS_VALIDATION_RECEIVED) {
                     LOG(log_.debug()) << "Forwarding validation: " << object;
                     subscriptions_->forwardValidation(object);
-                } else if (object.contains(JS(type)) && object.at(JS(type)) == JS_ManifestReceived) {
+                } else if (object.contains(JS(type)) && object.at(JS(type)) == kJS_MANIFEST_RECEIVED) {
                     LOG(log_.debug()) << "Forwarding manifest: " << object;
                     subscriptions_->forwardManifest(object);
                 }
@@ -299,6 +282,8 @@ SubscriptionSource::handleError(util::requests::RequestError const& error, boost
     logError(error);
     if (not stop_) {
         retry_.retry([this] { subscribe(); });
+    } else {
+        stopHelper_.readyToStop();
     }
 }
 
@@ -363,12 +348,12 @@ SubscriptionSource::setValidatedRange(std::string range)
 std::string const&
 SubscriptionSource::getSubscribeCommandJson()
 {
-    static boost::json::object const jsonValue{
+    static boost::json::object const kJSON_VALUE{
         {"command", "subscribe"},
         {"streams", {"ledger", "manifests", "validations", "transactions_proposed"}},
     };
-    static std::string const jsonString = boost::json::serialize(jsonValue);
-    return jsonString;
+    static std::string const kJSON_STRING = boost::json::serialize(kJSON_VALUE);
+    return kJSON_STRING;
 }
 
 }  // namespace etl::impl

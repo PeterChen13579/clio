@@ -25,6 +25,8 @@
 #include "data/cassandra/impl/Tuple.hpp"
 #include "util/UnsupportedType.hpp"
 
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_io.hpp>
 #include <cassandra.h>
 #include <fmt/core.h>
 #include <xrpl/basics/base_uint.h>
@@ -43,7 +45,7 @@
 namespace data::cassandra::impl {
 
 class Statement : public ManagedObject<CassStatement> {
-    static constexpr auto deleter = [](CassStatement* ptr) { cass_statement_free(ptr); };
+    static constexpr auto kDELETER = [](CassStatement* ptr) { cass_statement_free(ptr); };
 
 public:
     /**
@@ -54,14 +56,14 @@ public:
      */
     template <typename... Args>
     explicit Statement(std::string_view query, Args&&... args)
-        : ManagedObject{cass_statement_new_n(query.data(), query.size(), sizeof...(args)), deleter}
+        : ManagedObject{cass_statement_new_n(query.data(), query.size(), sizeof...(args)), kDELETER}
     {
         cass_statement_set_consistency(*this, CASS_CONSISTENCY_QUORUM);
         cass_statement_set_is_idempotent(*this, cass_true);
         bind<Args...>(std::forward<Args>(args)...);
     }
 
-    /* implicit */ Statement(CassStatement* ptr) : ManagedObject{ptr, deleter}
+    /* implicit */ Statement(CassStatement* ptr) : ManagedObject{ptr, kDELETER}
     {
         cass_statement_set_consistency(*this, CASS_CONSISTENCY_QUORUM);
         cass_statement_set_is_idempotent(*this, cass_true);
@@ -135,9 +137,15 @@ public:
         } else if constexpr (std::is_same_v<DecayedType, Limit>) {
             auto const rc = cass_statement_bind_int32(*this, idx, value.limit);
             throwErrorIfNeeded(rc, "Bind limit (int32)");
-        }
-        // clio only uses bigint (int64_t) so we convert any incoming type
-        else if constexpr (std::is_convertible_v<DecayedType, int64_t>) {
+        } else if constexpr (std::is_convertible_v<DecayedType, boost::uuids::uuid>) {
+            auto const uuidStr = boost::uuids::to_string(value);
+            CassUuid cassUuid;
+            auto rc = cass_uuid_from_string(uuidStr.c_str(), &cassUuid);
+            throwErrorIfNeeded(rc, "CassUuid from string");
+            rc = cass_statement_bind_uuid(*this, idx, cassUuid);
+            throwErrorIfNeeded(rc, "Bind boost::uuid");
+            // clio only uses bigint (int64_t) so we convert any incoming type
+        } else if constexpr (std::is_convertible_v<DecayedType, int64_t>) {
             auto const rc = cass_statement_bind_int64(*this, idx, value);
             throwErrorIfNeeded(rc, "Bind int64");
         } else {
@@ -153,10 +161,10 @@ public:
  * This is used to produce Statement objects that can be executed.
  */
 class PreparedStatement : public ManagedObject<CassPrepared const> {
-    static constexpr auto deleter = [](CassPrepared const* ptr) { cass_prepared_free(ptr); };
+    static constexpr auto kDELETER = [](CassPrepared const* ptr) { cass_prepared_free(ptr); };
 
 public:
-    /* implicit */ PreparedStatement(CassPrepared const* ptr) : ManagedObject{ptr, deleter}
+    /* implicit */ PreparedStatement(CassPrepared const* ptr) : ManagedObject{ptr, kDELETER}
     {
     }
 

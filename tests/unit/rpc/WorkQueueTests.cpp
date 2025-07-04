@@ -20,17 +20,17 @@
 #include "rpc/WorkQueue.hpp"
 #include "util/LoggerFixtures.hpp"
 #include "util/MockPrometheus.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
-#include "util/newconfig/ConfigValue.hpp"
-#include "util/newconfig/Types.hpp"
+#include "util/config/ConfigDefinition.hpp"
+#include "util/config/ConfigValue.hpp"
+#include "util/config/Types.hpp"
 #include "util/prometheus/Counter.hpp"
 #include "util/prometheus/Gauge.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <condition_variable>
-#include <cstdint>
 #include <mutex>
 #include <semaphore>
 
@@ -45,48 +45,40 @@ struct RPCWorkQueueTestBase : NoLoggerFixture {
         {"workers", ConfigValue{ConfigType::Integer}.defaultValue(4)}
     };
 
-    WorkQueue queue = WorkQueue::make_WorkQueue(cfg);
+    WorkQueue queue = WorkQueue::makeWorkQueue(cfg);
 };
 
 struct WorkQueueTest : WithPrometheus, RPCWorkQueueTestBase {};
 
 TEST_F(WorkQueueTest, WhitelistedExecutionCountAddsUp)
 {
-    auto constexpr static TOTAL = 512u;
-    uint32_t executeCount = 0u;
+    static constexpr auto kTOTAL = 512u;
+    std::atomic_uint32_t executeCount = 0u;
 
-    std::mutex mtx;
-
-    for (auto i = 0u; i < TOTAL; ++i) {
-        queue.postCoro(
-            [&executeCount, &mtx](auto /* yield */) {
-                std::lock_guard const lk(mtx);
-                ++executeCount;
-            },
-            true
-        );
+    for (auto i = 0u; i < kTOTAL; ++i) {
+        queue.postCoro([&executeCount](auto /* yield */) { ++executeCount; }, true);
     }
 
     queue.join();
 
     auto const report = queue.report();
 
-    EXPECT_EQ(executeCount, TOTAL);
-    EXPECT_EQ(report.at("queued"), TOTAL);
+    EXPECT_EQ(executeCount, kTOTAL);
+    EXPECT_EQ(report.at("queued"), kTOTAL);
     EXPECT_EQ(report.at("current_queue_size"), 0);
     EXPECT_EQ(report.at("max_queue_size"), 2);
 }
 
 TEST_F(WorkQueueTest, NonWhitelistedPreventSchedulingAtQueueLimitExceeded)
 {
-    auto constexpr static TOTAL = 3u;
+    static constexpr auto kTOTAL = 3u;
     auto expectedCount = 2u;
     auto unblocked = false;
 
     std::mutex mtx;
     std::condition_variable cv;
 
-    for (auto i = 0u; i < TOTAL; ++i) {
+    for (auto i = 0u; i < kTOTAL; ++i) {
         auto res = queue.postCoro(
             [&](auto /* yield */) {
                 std::unique_lock lk{mtx};
@@ -97,7 +89,7 @@ TEST_F(WorkQueueTest, NonWhitelistedPreventSchedulingAtQueueLimitExceeded)
             false
         );
 
-        if (i == TOTAL - 1) {
+        if (i == kTOTAL - 1) {
             EXPECT_FALSE(res);
 
             std::unique_lock const lk{mtx};
@@ -162,7 +154,7 @@ struct WorkQueueMockPrometheusTest : WithMockPrometheus, RPCWorkQueueTestBase {}
 TEST_F(WorkQueueMockPrometheusTest, postCoroCouhters)
 {
     auto& queuedMock = makeMock<CounterInt>("work_queue_queued_total_number", "");
-    auto& durationMock = makeMock<CounterInt>("work_queue_cumulitive_tasks_duration_us", "");
+    auto& durationMock = makeMock<CounterInt>("work_queue_cumulative_tasks_duration_us", "");
     auto& curSizeMock = makeMock<GaugeInt>("work_queue_current_size", "");
 
     std::binary_semaphore semaphore{0};

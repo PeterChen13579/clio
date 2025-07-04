@@ -24,10 +24,10 @@
 #include "util/MockMigrationBackend.hpp"
 #include "util/MockMigrationBackendFixture.hpp"
 #include "util/MockPrometheus.hpp"
-#include "util/newconfig/ConfigConstraints.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
-#include "util/newconfig/ConfigValue.hpp"
-#include "util/newconfig/Types.hpp"
+#include "util/config/ConfigConstraints.hpp"
+#include "util/config/ConfigDefinition.hpp"
+#include "util/config/ConfigValue.hpp"
+#include "util/config/Types.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -46,7 +46,7 @@ struct MigrationManagerBaseTest : public util::prometheus::WithMockPrometheus, p
     util::config::ClioConfigDefinition cfg{
         {"migration.full_scan_threads",
          util::config::ConfigValue{util::config::ConfigType::Integer}.defaultValue(2).withConstraint(
-             util::config::validateUint32
+             util::config::gValidateUint32
          )}
     };
     std::shared_ptr<TestCassandraMigrationManager> migrationManager;
@@ -54,7 +54,6 @@ struct MigrationManagerBaseTest : public util::prometheus::WithMockPrometheus, p
     MigrationManagerBaseTest()
     {
         auto mockBackendPtr = backend_.operator std::shared_ptr<MockMigrationBackend>();
-        TestMigratorRegister const migratorRegister(mockBackendPtr);
         migrationManager = std::make_shared<TestCassandraMigrationManager>(mockBackendPtr, cfg.getObject("migration"));
     }
 };

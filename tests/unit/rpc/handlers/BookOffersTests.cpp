@@ -17,6 +17,7 @@
 */
 //==============================================================================
 
+#include "data/AmendmentCenter.hpp"
 #include "data/Types.hpp"
 #include "rpc/Errors.hpp"
 #include "rpc/RPCHelpers.hpp"
@@ -24,6 +25,7 @@
 #include "rpc/common/Types.hpp"
 #include "rpc/handlers/BookOffers.hpp"
 #include "util/HandlerBaseTestFixture.hpp"
+#include "util/MockAmendmentCenter.hpp"
 #include "util/NameGenerator.hpp"
 #include "util/TestObject.hpp"
 
@@ -35,7 +37,6 @@
 #include <xrpl/basics/Blob.h>
 #include <xrpl/basics/base_uint.h>
 #include <xrpl/protocol/AccountID.h>
-#include <xrpl/protocol/Book.h>
 #include <xrpl/protocol/Indexes.h>
 #include <xrpl/protocol/LedgerFormats.h>
 #include <xrpl/protocol/LedgerHeader.h>
@@ -50,29 +51,22 @@
 #include <string>
 #include <vector>
 
-constexpr static auto ACCOUNT = "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn";
-constexpr static auto ACCOUNT2 = "rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun";
+namespace {
 
-constexpr static auto LEDGERHASH = "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652";
-constexpr static auto INDEX1 = "1B8590C01B0006EDFA9ED60296DD052DC5E90F99659B25014D08E1BC983515BC";
-constexpr static auto INDEX2 = "E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321";
-// 20 USD : 10 XRP
-constexpr static auto PAYS20USDGETS10XRPBOOKDIR = "43B83ADC452B85FCBADA6CAEAC5181C255A213630D58FFD455071AFD498D0000";
-// 20 XRP : 10 USD
-constexpr static auto PAYS20XRPGETS10USDBOOKDIR = "7B1767D41DBCE79D9585CF9D0262A5FEC45E5206FF524F8B55071AFD498D0000";
-// transfer rate x2
-constexpr static auto TRANSFERRATEX2 = 2000000000;
+constexpr auto kACCOUNT = "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn";
+constexpr auto kACCOUNT2 = "rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun";
 
-using namespace rpc;
-namespace json = boost::json;
-using namespace testing;
+constexpr auto kLEDGER_HASH = "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652";
+constexpr auto kINDEX1 = "1B8590C01B0006EDFA9ED60296DD052DC5E90F99659B25014D08E1BC983515BC";
+constexpr auto kINDEX2 = "E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321";
 
-struct RPCBookOffersHandlerTest : HandlerBaseTest {
-    RPCBookOffersHandlerTest()
-    {
-        backend->setRange(10, 300);
-    }
-};
+constexpr auto kPAYS20_USD_GETS10_XRP_BOOK_DIR = "43B83ADC452B85FCBADA6CAEAC5181C255A213630D58FFD455071AFD498D0000";
+
+constexpr auto kPAYS20_XRP_GETS10_USD_BOOK_DIR = "7B1767D41DBCE79D9585CF9D0262A5FEC45E5206FF524F8B55071AFD498D0000";
+
+constexpr auto kTRANSFER_RATE_X2 = 2000000000;
+
+constexpr auto kDOMAIN = "F10D0CC9A0F9A3CBF585B80BE09A186483668FDBDD39AA7E3370F3649CE134E5";
 
 struct ParameterTestBundle {
     std::string testName;
@@ -81,12 +75,29 @@ struct ParameterTestBundle {
     std::string expectedErrorMessage;
 };
 
+}  // namespace
+
+using namespace rpc;
+using namespace data;
+namespace json = boost::json;
+using namespace testing;
+
+struct RPCBookOffersHandlerTest : HandlerBaseTest {
+    RPCBookOffersHandlerTest()
+    {
+        backend_->setRange(10, 300);
+    }
+
+protected:
+    StrictMockAmendmentCenterSharedPtr mockAmendmentCenterPtr_;
+};
+
 struct RPCBookOffersParameterTest : RPCBookOffersHandlerTest, WithParamInterface<ParameterTestBundle> {};
 
 TEST_P(RPCBookOffersParameterTest, CheckError)
 {
     auto bundle = GetParam();
-    auto const handler = AnyHandler{BookOffersHandler{backend}};
+    auto const handler = AnyHandler{BookOffersHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](boost::asio::yield_context yield) {
         auto const output = handler.process(json::parse(bundle.testJson), Context{.yield = yield});
         ASSERT_FALSE(output);
@@ -102,387 +113,438 @@ generateParameterBookOffersTestBundles()
     return std::vector<ParameterTestBundle>{
         ParameterTestBundle{
             .testName = "MissingTakerGets",
-            .testJson = R"({
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : "USD",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                    "currency": "USD",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 }
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Required field 'taker_gets' missing"
         },
         ParameterTestBundle{
             .testName = "MissingTakerPays",
-            .testJson = R"({
-                "taker_gets" : 
+            .testJson = R"JSON({
+                "taker_gets":
                 {
-                    "currency" : "USD",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                    "currency": "USD",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 }
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Required field 'taker_pays' missing"
         },
         ParameterTestBundle{
             .testName = "WrongTypeTakerPays",
-            .testJson = R"({
-                "taker_pays" : "wrong",
-                "taker_gets" : 
+            .testJson = R"JSON({
+                "taker_pays": "wrong",
+                "taker_gets":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 }
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters."
         },
         ParameterTestBundle{
             .testName = "WrongTypeTakerGets",
-            .testJson = R"({
-                "taker_gets" : "wrong",
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_gets": "wrong",
+                "taker_pays":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 }
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters."
         },
         ParameterTestBundle{
             .testName = "TakerPaysMissingCurrency",
-            .testJson = R"({
-                "taker_pays" : {},
-                "taker_gets" : 
+            .testJson = R"JSON({
+                "taker_pays": {},
+                "taker_gets":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 }
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Required field 'currency' missing"
         },
         ParameterTestBundle{
             .testName = "TakerGetsMissingCurrency",
-            .testJson = R"({
-                "taker_gets" : {},
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_gets": {},
+                "taker_pays":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 }
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Required field 'currency' missing"
         },
         ParameterTestBundle{
             .testName = "TakerGetsWrongCurrency",
-            .testJson = R"({
-                "taker_gets" : 
+            .testJson = R"JSON({
+                "taker_gets":
                 {
-                    "currency" : "CNYY",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                    "currency": "CNYY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 },
-                "taker_pays" : 
+                "taker_pays":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 }
-            })",
+            })JSON",
             .expectedError = "dstAmtMalformed",
             .expectedErrorMessage = "Destination amount/currency/issuer is malformed."
         },
         ParameterTestBundle{
             .testName = "TakerPaysWrongCurrency",
-            .testJson = R"({
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : "CNYY",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                    "currency": "CNYY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 },
-                "taker_gets" : 
+                "taker_gets":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 }
-            })",
+            })JSON",
             .expectedError = "srcCurMalformed",
             .expectedErrorMessage = "Source currency is malformed."
         },
         ParameterTestBundle{
             .testName = "TakerGetsCurrencyNotString",
-            .testJson = R"({
-                "taker_gets" : 
+            .testJson = R"JSON({
+                "taker_gets":
                 {
-                    "currency" : 123,
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                    "currency": 123,
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 },
-                "taker_pays" : 
+                "taker_pays":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 }
-            })",
+            })JSON",
             .expectedError = "dstAmtMalformed",
             .expectedErrorMessage = "Destination amount/currency/issuer is malformed."
         },
         ParameterTestBundle{
             .testName = "TakerPaysCurrencyNotString",
-            .testJson = R"({
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : 123,
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                    "currency": 123,
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 },
-                "taker_gets" : 
+                "taker_gets":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 }
-            })",
+            })JSON",
             .expectedError = "srcCurMalformed",
             .expectedErrorMessage = "Source currency is malformed."
         },
         ParameterTestBundle{
             .testName = "TakerGetsWrongIssuer",
-            .testJson = R"({
-                "taker_gets" : 
+            .testJson = R"JSON({
+                "taker_gets":
                 {
-                    "currency" : "CNY",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs5"
+                    "currency": "CNY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs5"
                 },
-                "taker_pays" : 
+                "taker_pays":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 }
-            })",
+            })JSON",
             .expectedError = "dstIsrMalformed",
             .expectedErrorMessage = "Destination issuer is malformed."
         },
         ParameterTestBundle{
             .testName = "TakerPaysWrongIssuer",
-            .testJson = R"({
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : "CNY",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs5"
+                    "currency": "CNY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs5"
                 },
-                "taker_gets" : 
+                "taker_gets":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 }
-            })",
+            })JSON",
             .expectedError = "srcIsrMalformed",
             .expectedErrorMessage = "Source issuer is malformed."
         },
         ParameterTestBundle{
             .testName = "InvalidTaker",
-            .testJson = R"({
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : "CNY",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                    "currency": "CNY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 },
-                "taker_gets" : 
+                "taker_gets":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 },
                 "taker": "123"
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid field 'taker'."
         },
         ParameterTestBundle{
             .testName = "TakerNotString",
-            .testJson = R"({
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : "CNY",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                    "currency": "CNY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 },
-                "taker_gets" : 
+                "taker_gets":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 },
                 "taker": 123
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid field 'taker'."
         },
         ParameterTestBundle{
-            .testName = "LimitNotInt",
-            .testJson = R"({
-                "taker_pays" : 
+            .testName = "Domain_InvalidType",
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : "CNY",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                    "currency": "CNY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 },
-                "taker_gets" : 
+                "taker_gets":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
+                },
+                "domain": 0
+            })JSON",
+            .expectedError = "domainMalformed",
+            .expectedErrorMessage = "Unable to parse domain."
+        },
+        ParameterTestBundle{
+            .testName = "Domain_InvalidInt",
+            .testJson = R"JSON({
+                "taker_pays":
+                {
+                    "currency": "CNY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                },
+                "taker_gets":
+                {
+                    "currency": "XRP"
+                },
+                "domain": "123"
+            })JSON",
+            .expectedError = "domainMalformed",
+            .expectedErrorMessage = "Unable to parse domain."
+        },
+        ParameterTestBundle{
+            .testName = "Domain_InvalidObject",
+            .testJson = R"JSON({
+                "taker_pays":
+                {
+                    "currency": "CNY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                },
+                "taker_gets":
+                {
+                    "currency": "XRP"
+                },
+                "domain": {}
+            })JSON",
+            .expectedError = "domainMalformed",
+            .expectedErrorMessage = "Unable to parse domain."
+        },
+        ParameterTestBundle{
+            .testName = "LimitNotInt",
+            .testJson = R"JSON({
+                "taker_pays":
+                {
+                    "currency": "CNY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                },
+                "taker_gets":
+                {
+                    "currency": "XRP"
                 },
                 "limit": "123"
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters."
         },
         ParameterTestBundle{
-            .testName = "LimitNagetive",
-            .testJson = R"({
-                "taker_pays" : 
+            .testName = "LimitNegative",
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : "CNY",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                    "currency": "CNY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 },
-                "taker_gets" : 
+                "taker_gets":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 },
                 "limit": -1
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters."
         },
         ParameterTestBundle{
             .testName = "LimitZero",
-            .testJson = R"({
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : "CNY",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                    "currency": "CNY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 },
-                "taker_gets" : 
+                "taker_gets":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 },
                 "limit": 0
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters."
         },
         ParameterTestBundle{
             .testName = "LedgerIndexInvalid",
-            .testJson = R"({
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : "CNY",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                    "currency": "CNY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 },
-                "taker_gets" : 
+                "taker_gets":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 },
                 "ledger_index": "xxx"
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "ledgerIndexMalformed"
         },
         ParameterTestBundle{
             .testName = "LedgerHashInvalid",
-            .testJson = R"({
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : "CNY",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                    "currency": "CNY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 },
-                "taker_gets" : 
+                "taker_gets":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 },
                 "ledger_hash": "xxx"
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "ledger_hashMalformed"
         },
         ParameterTestBundle{
             .testName = "LedgerHashNotString",
-            .testJson = R"({
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : "CNY",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                    "currency": "CNY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 },
-                "taker_gets" : 
+                "taker_gets":
                 {
-                    "currency" : "XRP"
+                    "currency": "XRP"
                 },
                 "ledger_hash": 123
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "ledger_hashNotString"
         },
         ParameterTestBundle{
             .testName = "GetsPaysXRPWithIssuer",
-            .testJson = R"({
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : "XRP",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                    "currency": "XRP",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 },
-                "taker_gets" : 
+                "taker_gets":
                 {
-                    "currency" : "CNY",
-                    "issuer" : "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn"
+                    "currency": "CNY",
+                    "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn"
                 }
-            })",
+            })JSON",
             .expectedError = "srcIsrMalformed",
             .expectedErrorMessage = "Unneeded field 'taker_pays.issuer' for XRP currency specification."
         },
         ParameterTestBundle{
             .testName = "PaysCurrencyWithXRPIssuer",
-            .testJson = R"({
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : "JPY"                    
+                    "currency": "JPY"
                 },
-                "taker_gets" : 
+                "taker_gets":
                 {
-                    "currency" : "CNY",
-                    "issuer" : "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn"
+                    "currency": "CNY",
+                    "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn"
                 }
-            })",
+            })JSON",
             .expectedError = "srcIsrMalformed",
             .expectedErrorMessage = "Invalid field 'taker_pays.issuer', expected non-XRP issuer."
         },
         ParameterTestBundle{
             .testName = "GetsCurrencyWithXRPIssuer",
-            .testJson = R"({
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : "XRP"                    
+                    "currency": "XRP"
                 },
-                "taker_gets" : 
+                "taker_gets":
                 {
-                    "currency" : "CNY"                    
-                }            
-            })",
+                    "currency": "CNY"
+                }
+            })JSON",
             .expectedError = "dstIsrMalformed",
             .expectedErrorMessage = "Invalid field 'taker_gets.issuer', expected non-XRP issuer."
         },
         ParameterTestBundle{
             .testName = "GetsXRPWithIssuer",
-            .testJson = R"({
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : "CNY",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"                    
+                    "currency": "CNY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 },
-                "taker_gets" : 
+                "taker_gets":
                 {
-                    "currency" : "XRP",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"                    
-                }            
-            })",
+                    "currency": "XRP",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                }
+            })JSON",
             .expectedError = "dstIsrMalformed",
             .expectedErrorMessage = "Unneeded field 'taker_gets.issuer' for XRP currency specification."
         },
         ParameterTestBundle{
             .testName = "BadMarket",
-            .testJson = R"({
-                "taker_pays" : 
+            .testJson = R"JSON({
+                "taker_pays":
                 {
-                    "currency" : "CNY",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"                    
+                    "currency": "CNY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
                 },
-                "taker_gets" : 
+                "taker_gets":
                 {
-                    "currency" : "CNY",
-                    "issuer" : "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"                   
-                }            
-            })",
+                    "currency": "CNY",
+                    "issuer": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B"
+                }
+            })JSON",
             .expectedError = "badMarket",
             .expectedErrorMessage = "badMarket"
         }
@@ -493,7 +555,7 @@ INSTANTIATE_TEST_SUITE_P(
     RPCBookOffersHandler,
     RPCBookOffersParameterTest,
     testing::ValuesIn(generateParameterBookOffersTestBundles()),
-    tests::util::NameGenerator
+    tests::util::kNAME_GENERATOR
 );
 
 struct BookOffersNormalTestBundle {
@@ -504,6 +566,7 @@ struct BookOffersNormalTestBundle {
     uint32_t ledgerObjectCalls;
     std::vector<ripple::STObject> mockedOffers;
     std::string expectedJson;
+    uint32_t amendmentIsEnabledCalls = 0;
 };
 
 struct RPCBookOffersNormalPathTest : public RPCBookOffersHandlerTest,
@@ -514,21 +577,26 @@ TEST_P(RPCBookOffersNormalPathTest, CheckOutput)
     auto const& bundle = GetParam();
     auto const seq = 300;
 
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
     // return valid ledgerHeader
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, seq);
-    ON_CALL(*backend, fetchLedgerBySequence(seq, _)).WillByDefault(Return(ledgerHeader));
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, seq);
+    ON_CALL(*backend_, fetchLedgerBySequence(seq, _)).WillByDefault(Return(ledgerHeader));
+
+    EXPECT_CALL(*mockAmendmentCenterPtr_, isEnabled(_, Amendments::fixFrozenLPTokenTransfer, _))
+        .Times(bundle.amendmentIsEnabledCalls);
+    ON_CALL(*mockAmendmentCenterPtr_, isEnabled(_, Amendments::fixFrozenLPTokenTransfer, _))
+        .WillByDefault(Return(false));
 
     // return valid book dir
-    EXPECT_CALL(*backend, doFetchSuccessorKey).Times(bundle.mockedSuccessors.size());
+    EXPECT_CALL(*backend_, doFetchSuccessorKey).Times(bundle.mockedSuccessors.size());
     for (auto const& [key, value] : bundle.mockedSuccessors) {
-        ON_CALL(*backend, doFetchSuccessorKey(key, seq, _)).WillByDefault(Return(value));
+        ON_CALL(*backend_, doFetchSuccessorKey(key, seq, _)).WillByDefault(Return(value));
     }
 
-    EXPECT_CALL(*backend, doFetchLedgerObject).Times(bundle.ledgerObjectCalls);
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(bundle.ledgerObjectCalls);
 
     for (auto const& [key, value] : bundle.mockedLedgerObjects) {
-        ON_CALL(*backend, doFetchLedgerObject(key, seq, _)).WillByDefault(Return(value));
+        ON_CALL(*backend_, doFetchLedgerObject(key, seq, _)).WillByDefault(Return(value));
     }
 
     std::vector<Blob> bbs;
@@ -538,10 +606,10 @@ TEST_P(RPCBookOffersNormalPathTest, CheckOutput)
         std::back_inserter(bbs),
         [](auto const& obj) { return obj.getSerializer().peekData(); }
     );
-    ON_CALL(*backend, doFetchLedgerObjects).WillByDefault(Return(bbs));
-    EXPECT_CALL(*backend, doFetchLedgerObjects).Times(1);
+    ON_CALL(*backend_, doFetchLedgerObjects).WillByDefault(Return(bbs));
+    EXPECT_CALL(*backend_, doFetchLedgerObjects).Times(1);
 
-    auto const handler = AnyHandler{BookOffersHandler{backend}};
+    auto const handler = AnyHandler{BookOffersHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](boost::asio::yield_context yield) {
         auto const output = handler.process(json::parse(bundle.inputJson), Context{.yield = yield});
         ASSERT_TRUE(output);
@@ -552,90 +620,125 @@ TEST_P(RPCBookOffersNormalPathTest, CheckOutput)
 static auto
 generateNormalPathBookOffersTestBundles()
 {
-    auto const account = GetAccountIDWithString(ACCOUNT);
-    auto const account2 = GetAccountIDWithString(ACCOUNT2);
+    auto const account = getAccountIdWithString(kACCOUNT);
+    auto const account2 = getAccountIdWithString(kACCOUNT2);
 
-    auto const frozenTrustLine = CreateRippleStateLedgerObject(
-        "USD", ACCOUNT, -8, ACCOUNT2, 1000, ACCOUNT, 2000, INDEX1, 2, ripple::lsfLowFreeze
+    auto const frozenTrustLine = createRippleStateLedgerObject(
+        "USD", kACCOUNT, -8, kACCOUNT2, 1000, kACCOUNT, 2000, kINDEX1, 2, ripple::lsfLowFreeze
     );
 
-    auto const gets10USDPays20XRPOffer = CreateOfferLedgerObject(
-        ACCOUNT2,
+    auto const gets10USDPays20XRPOffer = createOfferLedgerObject(
+        kACCOUNT2,
         10,
         20,
         ripple::to_string(ripple::to_currency("USD")),
         ripple::to_string(ripple::xrpCurrency()),
-        ACCOUNT,
+        kACCOUNT,
         toBase58(ripple::xrpAccount()),
-        PAYS20XRPGETS10USDBOOKDIR
+        kPAYS20_XRP_GETS10_USD_BOOK_DIR
     );
 
-    auto const gets10USDPays20XRPOwnerOffer = CreateOfferLedgerObject(
-        ACCOUNT,
+    auto const gets10USDPays20XRPOwnerOffer = createOfferLedgerObject(
+        kACCOUNT,
         10,
         20,
         ripple::to_string(ripple::to_currency("USD")),
         ripple::to_string(ripple::xrpCurrency()),
-        ACCOUNT,
+        kACCOUNT,
         toBase58(ripple::xrpAccount()),
-        PAYS20XRPGETS10USDBOOKDIR
+        kPAYS20_XRP_GETS10_USD_BOOK_DIR
     );
 
-    auto const gets10XRPPays20USDOffer = CreateOfferLedgerObject(
-        ACCOUNT2,
+    auto const gets10XRPPays20USDOffer = createOfferLedgerObject(
+        kACCOUNT2,
         10,
         20,
         ripple::to_string(ripple::xrpCurrency()),
         ripple::to_string(ripple::to_currency("USD")),
         toBase58(ripple::xrpAccount()),
-        ACCOUNT,
-        PAYS20USDGETS10XRPBOOKDIR
+        kACCOUNT,
+        kPAYS20_USD_GETS10_XRP_BOOK_DIR
     );
 
-    auto const getsXRPPaysUSDBook = getBookBase(std::get<ripple::Book>(
-        rpc::parseBook(ripple::to_currency("USD"), account, ripple::xrpCurrency(), ripple::xrpAccount())
-    ));
-    auto const getsUSDPaysXRPBook = getBookBase(std::get<ripple::Book>(
-        rpc::parseBook(ripple::xrpCurrency(), ripple::xrpAccount(), ripple::to_currency("USD"), account)
-    ));
+    auto const gets10XRPPays20USDOfferWithDomain = createOfferLedgerObject(
+        kACCOUNT2,
+        10,
+        20,
+        ripple::to_string(ripple::xrpCurrency()),
+        ripple::to_string(ripple::to_currency("USD")),
+        toBase58(ripple::xrpAccount()),
+        kACCOUNT,
+        kPAYS20_USD_GETS10_XRP_BOOK_DIR,
+        kDOMAIN
+    );
+
+    auto const getsXRPPaysUSDBook = getBookBase(
+        rpc::parseBook(ripple::to_currency("USD"), account, ripple::xrpCurrency(), ripple::xrpAccount(), std::nullopt)
+            .value()
+    );
+    auto const getsXRPPaysUSDBookWithDomain = getBookBase(
+        rpc::parseBook(ripple::to_currency("USD"), account, ripple::xrpCurrency(), ripple::xrpAccount(), kDOMAIN)
+            .value()
+    );
+    auto const getsUSDPaysXRPBook = getBookBase(
+        rpc::parseBook(ripple::xrpCurrency(), ripple::xrpAccount(), ripple::to_currency("USD"), account, std::nullopt)
+            .value()
+    );
 
     auto const getsXRPPaysUSDInputJson = fmt::format(
-        R"({{
-            "taker_gets": 
+        R"JSON({{
+            "taker_gets":
             {{
                 "currency": "XRP"
             }},
-            "taker_pays": 
+            "taker_pays":
             {{
                 "currency": "USD",
                 "issuer": "{}"
             }}
-        }})",
-        ACCOUNT
+        }})JSON",
+        kACCOUNT
+    );
+
+    auto const getsXRPPaysUSDInputJsonWithDomain = fmt::format(
+        R"JSON({{
+            "taker_gets":
+            {{
+                "currency": "XRP"
+            }},
+            "taker_pays":
+            {{
+                "currency": "USD",
+                "issuer": "{}"
+            }},
+            "domain": "{}"
+        }})JSON",
+        kACCOUNT,
+        kDOMAIN
     );
 
     auto const paysXRPGetsUSDInputJson = fmt::format(
-        R"({{
-            "taker_pays": 
+        R"JSON({{
+            "taker_pays":
             {{
                 "currency": "XRP"
             }},
-            "taker_gets": 
+            "taker_gets":
             {{
                 "currency": "USD",
                 "issuer": "{}"
             }}
-        }})",
-        ACCOUNT
+        }})JSON",
+        kACCOUNT
     );
 
-    auto const feeLedgerObject = CreateLegacyFeeSettingBlob(1, 2, 3, 4, 0);
+    auto const feeLedgerObject = createLegacyFeeSettingBlob(1, 2, 3, 4, 0);
 
     auto const trustline30Balance =
-        CreateRippleStateLedgerObject("USD", ACCOUNT, -30, ACCOUNT2, 1000, ACCOUNT, 2000, INDEX1, 2, 0);
+        createRippleStateLedgerObject("USD", kACCOUNT, -30, kACCOUNT2, 1000, kACCOUNT, 2000, kINDEX1, 2, 0);
 
     auto const trustline8Balance =
-        CreateRippleStateLedgerObject("USD", ACCOUNT, -8, ACCOUNT2, 1000, ACCOUNT, 2000, INDEX1, 2, 0);
+        createRippleStateLedgerObject("USD", kACCOUNT, -8, kACCOUNT2, 1000, kACCOUNT, 2000, kINDEX1, 2, 0);
 
     return std::vector<BookOffersNormalTestBundle>{
         BookOffersNormalTestBundle{
@@ -644,20 +747,20 @@ generateNormalPathBookOffersTestBundles()
             // prepare offer dir index
             .mockedSuccessors =
                 std::map<ripple::uint256, std::optional<ripple::uint256>>{
-                    {getsXRPPaysUSDBook, ripple::uint256{PAYS20USDGETS10XRPBOOKDIR}},
-                    {ripple::uint256{PAYS20USDGETS10XRPBOOKDIR}, std::optional<ripple::uint256>{}}
+                    {getsXRPPaysUSDBook, ripple::uint256{kPAYS20_USD_GETS10_XRP_BOOK_DIR}},
+                    {ripple::uint256{kPAYS20_USD_GETS10_XRP_BOOK_DIR}, std::optional<ripple::uint256>{}}
                 },
             .mockedLedgerObjects =
                 std::map<ripple::uint256, ripple::Blob>{
                     // book dir object
-                    {ripple::uint256{PAYS20USDGETS10XRPBOOKDIR},
-                     CreateOwnerDirLedgerObject({ripple::uint256{INDEX2}}, INDEX1).getSerializer().peekData()},
+                    {ripple::uint256{kPAYS20_USD_GETS10_XRP_BOOK_DIR},
+                     createOwnerDirLedgerObject({ripple::uint256{kINDEX2}}, kINDEX1).getSerializer().peekData()},
                     // pays issuer account object
                     {ripple::keylet::account(account).key,
-                     CreateAccountRootObject(ACCOUNT, 0, 2, 200, 2, INDEX1, 2).getSerializer().peekData()},
+                     createAccountRootObject(kACCOUNT, 0, 2, 200, 2, kINDEX1, 2).getSerializer().peekData()},
                     // owner account object
                     {ripple::keylet::account(account2).key,
-                     CreateAccountRootObject(ACCOUNT2, 0, 2, 200, 2, INDEX1, 2).getSerializer().peekData()},
+                     createAccountRootObject(kACCOUNT2, 0, 2, 200, 2, kINDEX1, 2).getSerializer().peekData()},
                     // fee settings: base ->3 inc->2, account2 has 2 objects ,total
                     // reserve ->7
                     // owner_funds should be 193
@@ -666,34 +769,34 @@ generateNormalPathBookOffersTestBundles()
             .ledgerObjectCalls = 5,
             .mockedOffers = std::vector<ripple::STObject>{gets10XRPPays20USDOffer},
             .expectedJson = fmt::format(
-                R"({{
-                    "ledger_hash":"{}",
-                    "ledger_index":300,
-                    "offers":[
+                R"JSON({{
+                    "ledger_hash": "{}",
+                    "ledger_index": 300,
+                    "offers": [
                         {{
-                            "Account":"{}",
-                            "BookDirectory":"43B83ADC452B85FCBADA6CAEAC5181C255A213630D58FFD455071AFD498D0000",
-                            "BookNode":"0",
-                            "Flags":0,
-                            "LedgerEntryType":"Offer",
-                            "OwnerNode":"0",
-                            "PreviousTxnID":"0000000000000000000000000000000000000000000000000000000000000000",
-                            "PreviousTxnLgrSeq":0,
-                            "Sequence":0,
-                            "TakerGets":"10",
-                            "TakerPays":{{
-                                "currency":"USD",
-                                "issuer":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-                                "value":"20"
+                            "Account": "{}",
+                            "BookDirectory": "43B83ADC452B85FCBADA6CAEAC5181C255A213630D58FFD455071AFD498D0000",
+                            "BookNode": "0",
+                            "Flags": 0,
+                            "LedgerEntryType": "Offer",
+                            "OwnerNode": "0",
+                            "PreviousTxnID": "0000000000000000000000000000000000000000000000000000000000000000",
+                            "PreviousTxnLgrSeq": 0,
+                            "Sequence": 0,
+                            "TakerGets": "10",
+                            "TakerPays": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "20"
                             }},
-                            "index":"E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
-                            "owner_funds":"{}",
-                            "quality":"{}"
+                            "index": "E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
+                            "owner_funds": "{}",
+                            "quality": "{}"
                         }}
                     ]
-                }})",
-                LEDGERHASH,
-                ACCOUNT2,
+                }})JSON",
+                kLEDGER_HASH,
+                kACCOUNT2,
                 193,
                 2
             )
@@ -704,20 +807,20 @@ generateNormalPathBookOffersTestBundles()
             // prepare offer dir index
             .mockedSuccessors =
                 std::map<ripple::uint256, std::optional<ripple::uint256>>{
-                    {getsXRPPaysUSDBook, ripple::uint256{PAYS20USDGETS10XRPBOOKDIR}},
-                    {ripple::uint256{PAYS20USDGETS10XRPBOOKDIR}, std::optional<ripple::uint256>{}}
+                    {getsXRPPaysUSDBook, ripple::uint256{kPAYS20_USD_GETS10_XRP_BOOK_DIR}},
+                    {ripple::uint256{kPAYS20_USD_GETS10_XRP_BOOK_DIR}, std::optional<ripple::uint256>{}}
                 },
             .mockedLedgerObjects =
                 std::map<ripple::uint256, ripple::Blob>{
                     // book dir object
-                    {ripple::uint256{PAYS20USDGETS10XRPBOOKDIR},
-                     CreateOwnerDirLedgerObject({ripple::uint256{INDEX2}}, INDEX1).getSerializer().peekData()},
+                    {ripple::uint256{kPAYS20_USD_GETS10_XRP_BOOK_DIR},
+                     createOwnerDirLedgerObject({ripple::uint256{kINDEX2}}, kINDEX1).getSerializer().peekData()},
                     // pays issuer account object
                     {ripple::keylet::account(account).key,
-                     CreateAccountRootObject(ACCOUNT, 0, 2, 200, 2, INDEX1, 2).getSerializer().peekData()},
+                     createAccountRootObject(kACCOUNT, 0, 2, 200, 2, kINDEX1, 2).getSerializer().peekData()},
                     // owner account object, hold
                     {ripple::keylet::account(account2).key,
-                     CreateAccountRootObject(ACCOUNT2, 0, 2, 5 + 7, 2, INDEX1, 2).getSerializer().peekData()},
+                     createAccountRootObject(kACCOUNT2, 0, 2, 5 + 7, 2, kINDEX1, 2).getSerializer().peekData()},
                     // fee settings: base ->3 inc->2, account2 has 2 objects
                     // ,total
                     // reserve ->7
@@ -726,41 +829,41 @@ generateNormalPathBookOffersTestBundles()
             .ledgerObjectCalls = 5,
             .mockedOffers = std::vector<ripple::STObject>{gets10XRPPays20USDOffer},
             .expectedJson = fmt::format(
-                R"({{
-                    "ledger_hash":"{}",
-                    "ledger_index":300,
+                R"JSON({{
+                    "ledger_hash": "{}",
+                    "ledger_index": 300,
                     "offers":
                     [
                         {{
-                            "Account":"{}",
-                            "BookDirectory":"43B83ADC452B85FCBADA6CAEAC5181C255A213630D58FFD455071AFD498D0000",
-                            "BookNode":"0",
-                            "Flags":0,
-                            "LedgerEntryType":"Offer",
-                            "OwnerNode":"0",
-                            "PreviousTxnID":"0000000000000000000000000000000000000000000000000000000000000000",
-                            "PreviousTxnLgrSeq":0,
-                            "Sequence":0,
-                            "TakerGets":"10",
-                            "TakerPays":{{
-                                "currency":"USD",
-                                "issuer":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-                                "value":"20"
+                            "Account": "{}",
+                            "BookDirectory": "43B83ADC452B85FCBADA6CAEAC5181C255A213630D58FFD455071AFD498D0000",
+                            "BookNode": "0",
+                            "Flags": 0,
+                            "LedgerEntryType": "Offer",
+                            "OwnerNode": "0",
+                            "PreviousTxnID": "0000000000000000000000000000000000000000000000000000000000000000",
+                            "PreviousTxnLgrSeq": 0,
+                            "Sequence": 0,
+                            "TakerGets": "10",
+                            "TakerPays": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "20"
                             }},
-                            "index":"E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
-                            "owner_funds":"{}",
-                            "quality":"{}",
-                            "taker_gets_funded":"5",
-                            "taker_pays_funded":{{
-                                "currency":"USD",
-                                "issuer":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-                                "value":"10"
+                            "index": "E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
+                            "owner_funds": "{}",
+                            "quality": "{}",
+                            "taker_gets_funded": "5",
+                            "taker_pays_funded": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "10"
                             }}
                         }}
                     ]
-                }})",
-                LEDGERHASH,
-                ACCOUNT2,
+                }})JSON",
+                kLEDGER_HASH,
+                kACCOUNT2,
                 5,
                 2
             )
@@ -771,58 +874,121 @@ generateNormalPathBookOffersTestBundles()
             // prepare offer dir index
             .mockedSuccessors =
                 std::map<ripple::uint256, std::optional<ripple::uint256>>{
-                    {getsXRPPaysUSDBook, ripple::uint256{PAYS20USDGETS10XRPBOOKDIR}},
-                    {ripple::uint256{PAYS20USDGETS10XRPBOOKDIR}, std::optional<ripple::uint256>{}}
+                    {getsXRPPaysUSDBook, ripple::uint256{kPAYS20_USD_GETS10_XRP_BOOK_DIR}},
+                    {ripple::uint256{kPAYS20_USD_GETS10_XRP_BOOK_DIR}, std::optional<ripple::uint256>{}}
                 },
             .mockedLedgerObjects =
                 std::map<ripple::uint256, ripple::Blob>{
                     // book dir object
-                    {ripple::uint256{PAYS20USDGETS10XRPBOOKDIR},
-                     CreateOwnerDirLedgerObject({ripple::uint256{INDEX2}}, INDEX1).getSerializer().peekData()},
+                    {ripple::uint256{kPAYS20_USD_GETS10_XRP_BOOK_DIR},
+                     createOwnerDirLedgerObject({ripple::uint256{kINDEX2}}, kINDEX1).getSerializer().peekData()},
                     // pays issuer account object
                     {ripple::keylet::account(account).key,
-                     CreateAccountRootObject(ACCOUNT, ripple::lsfGlobalFreeze, 2, 200, 2, INDEX1, 2)
+                     createAccountRootObject(kACCOUNT, ripple::lsfGlobalFreeze, 2, 200, 2, kINDEX1, 2)
                          .getSerializer()
                          .peekData()}
                 },
             .ledgerObjectCalls = 3,
             .mockedOffers = std::vector<ripple::STObject>{gets10XRPPays20USDOffer},
             .expectedJson = fmt::format(
-                R"({{
-                    "ledger_hash":"{}",
-                    "ledger_index":300,
+                R"JSON({{
+                    "ledger_hash": "{}",
+                    "ledger_index": 300,
                     "offers":
                     [
                         {{
-                            "Account":"{}",
-                            "BookDirectory":"43B83ADC452B85FCBADA6CAEAC5181C255A213630D58FFD455071AFD498D0000",
-                            "BookNode":"0",
-                            "Flags":0,
-                            "LedgerEntryType":"Offer",
-                            "OwnerNode":"0",
-                            "PreviousTxnID":"0000000000000000000000000000000000000000000000000000000000000000",
-                            "PreviousTxnLgrSeq":0,
-                            "Sequence":0,
-                            "TakerGets":"10",
-                            "TakerPays":{{
-                                "currency":"USD",
-                                "issuer":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-                                "value":"20"
+                            "Account": "{}",
+                            "BookDirectory": "43B83ADC452B85FCBADA6CAEAC5181C255A213630D58FFD455071AFD498D0000",
+                            "BookNode": "0",
+                            "Flags": 0,
+                            "LedgerEntryType": "Offer",
+                            "OwnerNode": "0",
+                            "PreviousTxnID": "0000000000000000000000000000000000000000000000000000000000000000",
+                            "PreviousTxnLgrSeq": 0,
+                            "Sequence": 0,
+                            "TakerGets": "10",
+                            "TakerPays": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "20"
                             }},
-                            "index":"E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
-                            "owner_funds":"{}",
-                            "quality":"{}",
-                            "taker_gets_funded":"0",
-                            "taker_pays_funded":{{
-                                "currency":"USD",
-                                "issuer":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-                                "value":"0"
+                            "index": "E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
+                            "owner_funds": "{}",
+                            "quality": "{}",
+                            "taker_gets_funded": "0",
+                            "taker_pays_funded": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "0"
                             }}
                         }}
                     ]
-                }})",
-                LEDGERHASH,
-                ACCOUNT2,
+                }})JSON",
+                kLEDGER_HASH,
+                kACCOUNT2,
+                0,
+                2
+            )
+        },
+        BookOffersNormalTestBundle{
+            .testName = "PaysUSDGetsXRPFrozenWithDomain",
+            .inputJson = getsXRPPaysUSDInputJsonWithDomain,
+            // prepare offer dir index
+            .mockedSuccessors =
+                std::map<ripple::uint256, std::optional<ripple::uint256>>{
+                    {getsXRPPaysUSDBookWithDomain, ripple::uint256{kPAYS20_USD_GETS10_XRP_BOOK_DIR}},
+                    {ripple::uint256{kPAYS20_USD_GETS10_XRP_BOOK_DIR}, std::optional<ripple::uint256>{}}
+                },
+            .mockedLedgerObjects =
+                std::map<ripple::uint256, ripple::Blob>{
+                    // book dir object
+                    {ripple::uint256{kPAYS20_USD_GETS10_XRP_BOOK_DIR},
+                     createOwnerDirLedgerObject({ripple::uint256{kINDEX2}}, kINDEX1).getSerializer().peekData()},
+                    // pays issuer account object
+                    {ripple::keylet::account(account).key,
+                     createAccountRootObject(kACCOUNT, ripple::lsfGlobalFreeze, 2, 200, 2, kINDEX1, 2)
+                         .getSerializer()
+                         .peekData()}
+                },
+            .ledgerObjectCalls = 3,
+            .mockedOffers = std::vector<ripple::STObject>{gets10XRPPays20USDOfferWithDomain},
+            .expectedJson = fmt::format(
+                R"JSON({{
+                    "ledger_hash": "{}",
+                    "ledger_index": 300,
+                    "offers":
+                    [
+                        {{
+                            "Account": "{}",
+                            "BookDirectory": "43B83ADC452B85FCBADA6CAEAC5181C255A213630D58FFD455071AFD498D0000",
+                            "BookNode": "0",
+                            "DomainID": "F10D0CC9A0F9A3CBF585B80BE09A186483668FDBDD39AA7E3370F3649CE134E5",
+                            "Flags": 0,
+                            "LedgerEntryType": "Offer",
+                            "OwnerNode": "0",
+                            "PreviousTxnID": "0000000000000000000000000000000000000000000000000000000000000000",
+                            "PreviousTxnLgrSeq": 0,
+                            "Sequence": 0,
+                            "TakerGets": "10",
+                            "TakerPays": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "20"
+                            }},
+                            "index": "E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
+                            "owner_funds": "{}",
+                            "quality": "{}",
+                            "taker_gets_funded": "0",
+                            "taker_pays_funded": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "0"
+                            }}
+                        }}
+                    ]
+                }})JSON",
+                kLEDGER_HASH,
+                kACCOUNT2,
                 0,
                 2
             )
@@ -833,59 +999,61 @@ generateNormalPathBookOffersTestBundles()
             // prepare offer dir index
             .mockedSuccessors =
                 std::map<ripple::uint256, std::optional<ripple::uint256>>{
-                    {getsUSDPaysXRPBook, ripple::uint256{PAYS20XRPGETS10USDBOOKDIR}},
-                    {ripple::uint256{PAYS20XRPGETS10USDBOOKDIR}, std::optional<ripple::uint256>{}}
+                    {getsUSDPaysXRPBook, ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR}},
+                    {ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR}, std::optional<ripple::uint256>{}}
                 },
             .mockedLedgerObjects =
                 std::map<ripple::uint256, ripple::Blob>{
                     // book dir object
-                    {ripple::uint256{PAYS20XRPGETS10USDBOOKDIR},
-                     CreateOwnerDirLedgerObject({ripple::uint256{INDEX2}}, INDEX1).getSerializer().peekData()},
+                    {ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR},
+                     createOwnerDirLedgerObject({ripple::uint256{kINDEX2}}, kINDEX1).getSerializer().peekData()},
                     // gets issuer account object
                     {ripple::keylet::account(account).key,
-                     CreateAccountRootObject(ACCOUNT, ripple::lsfGlobalFreeze, 2, 200, 2, INDEX1, 2, TRANSFERRATEX2)
+                     createAccountRootObject(
+                         kACCOUNT, ripple::lsfGlobalFreeze, 2, 200, 2, kINDEX1, 2, kTRANSFER_RATE_X2
+                     )
                          .getSerializer()
                          .peekData()}
                 },
             .ledgerObjectCalls = 3,
             .mockedOffers = std::vector<ripple::STObject>{gets10USDPays20XRPOffer},
             .expectedJson = fmt::format(
-                R"({{
-                    "ledger_hash":"{}",
-                    "ledger_index":300,
+                R"JSON({{
+                    "ledger_hash": "{}",
+                    "ledger_index": 300,
                     "offers":
                     [
                         {{
-                            "Account":"{}",
-                            "BookDirectory":"{}",
-                            "BookNode":"0",
-                            "Flags":0,
-                            "LedgerEntryType":"Offer",
-                            "OwnerNode":"0",
-                            "PreviousTxnID":"0000000000000000000000000000000000000000000000000000000000000000",
-                            "PreviousTxnLgrSeq":0,
-                            "Sequence":0,
-                            "TakerPays":"20",
-                            "TakerGets":{{
-                                "currency":"USD",
-                                "issuer":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-                                "value":"10"
+                            "Account": "{}",
+                            "BookDirectory": "{}",
+                            "BookNode": "0",
+                            "Flags": 0,
+                            "LedgerEntryType": "Offer",
+                            "OwnerNode": "0",
+                            "PreviousTxnID": "0000000000000000000000000000000000000000000000000000000000000000",
+                            "PreviousTxnLgrSeq": 0,
+                            "Sequence": 0,
+                            "TakerPays": "20",
+                            "TakerGets": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "10"
                             }},
-                            "index":"E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
-                            "owner_funds":"{}",
-                            "quality":"{}",
-                            "taker_pays_funded":"0",
-                            "taker_gets_funded":{{
-                                "currency":"USD",
-                                "issuer":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-                                "value":"0"
+                            "index": "E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
+                            "owner_funds": "{}",
+                            "quality": "{}",
+                            "taker_pays_funded": "0",
+                            "taker_gets_funded": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "0"
                             }}
                         }}
                     ]
-                }})",
-                LEDGERHASH,
-                ACCOUNT2,
-                PAYS20XRPGETS10USDBOOKDIR,
+                }})JSON",
+                kLEDGER_HASH,
+                kACCOUNT2,
+                kPAYS20_XRP_GETS10_USD_BOOK_DIR,
                 0,
                 2
             )
@@ -896,17 +1064,17 @@ generateNormalPathBookOffersTestBundles()
             // prepare offer dir index
             .mockedSuccessors =
                 std::map<ripple::uint256, std::optional<ripple::uint256>>{
-                    {getsUSDPaysXRPBook, ripple::uint256{PAYS20XRPGETS10USDBOOKDIR}},
-                    {ripple::uint256{PAYS20XRPGETS10USDBOOKDIR}, std::optional<ripple::uint256>{}}
+                    {getsUSDPaysXRPBook, ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR}},
+                    {ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR}, std::optional<ripple::uint256>{}}
                 },
             .mockedLedgerObjects =
                 std::map<ripple::uint256, ripple::Blob>{
                     // book dir object
-                    {ripple::uint256{PAYS20XRPGETS10USDBOOKDIR},
-                     CreateOwnerDirLedgerObject({ripple::uint256{INDEX2}}, INDEX1).getSerializer().peekData()},
+                    {ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR},
+                     createOwnerDirLedgerObject({ripple::uint256{kINDEX2}}, kINDEX1).getSerializer().peekData()},
                     // gets issuer account object, rate is 1/2
                     {ripple::keylet::account(account).key,
-                     CreateAccountRootObject(ACCOUNT, 0, 2, 200, 2, INDEX1, 2, TRANSFERRATEX2)
+                     createAccountRootObject(kACCOUNT, 0, 2, 200, 2, kINDEX1, 2, kTRANSFER_RATE_X2)
                          .getSerializer()
                          .peekData()},
                     // trust line between gets issuer and owner,owner has 8 USD
@@ -916,45 +1084,46 @@ generateNormalPathBookOffersTestBundles()
             .ledgerObjectCalls = 6,
             .mockedOffers = std::vector<ripple::STObject>{gets10USDPays20XRPOffer},
             .expectedJson = fmt::format(
-                R"({{
-                    "ledger_hash":"{}",
-                    "ledger_index":300,
+                R"JSON({{
+                    "ledger_hash": "{}",
+                    "ledger_index": 300,
                     "offers":
                     [
                         {{
-                            "Account":"{}",
-                            "BookDirectory":"{}",
-                            "BookNode":"0",
-                            "Flags":0,
-                            "LedgerEntryType":"Offer",
-                            "OwnerNode":"0",
-                            "PreviousTxnID":"0000000000000000000000000000000000000000000000000000000000000000",
-                            "PreviousTxnLgrSeq":0,
-                            "Sequence":0,
-                            "TakerPays":"20",
-                            "TakerGets":{{
-                                "currency":"USD",
-                                "issuer":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-                                "value":"10"
+                            "Account": "{}",
+                            "BookDirectory": "{}",
+                            "BookNode": "0",
+                            "Flags": 0,
+                            "LedgerEntryType": "Offer",
+                            "OwnerNode": "0",
+                            "PreviousTxnID": "0000000000000000000000000000000000000000000000000000000000000000",
+                            "PreviousTxnLgrSeq": 0,
+                            "Sequence": 0,
+                            "TakerPays": "20",
+                            "TakerGets": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "10"
                             }},
-                            "index":"E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
-                            "owner_funds":"{}",
-                            "quality":"{}",
-                            "taker_gets_funded":{{
-                                "currency":"USD",
-                                "issuer":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-                                "value":"4"
+                            "index": "E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
+                            "owner_funds": "{}",
+                            "quality": "{}",
+                            "taker_gets_funded": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "4"
                             }},
-                            "taker_pays_funded":"8"
+                            "taker_pays_funded": "8"
                         }}
                     ]
-                }})",
-                LEDGERHASH,
-                ACCOUNT2,
-                PAYS20XRPGETS10USDBOOKDIR,
+                }})JSON",
+                kLEDGER_HASH,
+                kACCOUNT2,
+                kPAYS20_XRP_GETS10_USD_BOOK_DIR,
                 8,
                 2
-            )
+            ),
+            .amendmentIsEnabledCalls = 1,
         },
         BookOffersNormalTestBundle{
             .testName = "PaysXRPGetsUSDWithMultipleOffers",
@@ -962,19 +1131,19 @@ generateNormalPathBookOffersTestBundles()
             // prepare offer dir index
             .mockedSuccessors =
                 std::map<ripple::uint256, std::optional<ripple::uint256>>{
-                    {getsUSDPaysXRPBook, ripple::uint256{PAYS20XRPGETS10USDBOOKDIR}},
-                    {ripple::uint256{PAYS20XRPGETS10USDBOOKDIR}, std::optional<ripple::uint256>{}}
+                    {getsUSDPaysXRPBook, ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR}},
+                    {ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR}, std::optional<ripple::uint256>{}}
                 },
             .mockedLedgerObjects =
                 std::map<ripple::uint256, ripple::Blob>{
                     // book dir object
-                    {ripple::uint256{PAYS20XRPGETS10USDBOOKDIR},
-                     CreateOwnerDirLedgerObject({ripple::uint256{INDEX2}, ripple::uint256{INDEX2}}, INDEX1)
+                    {ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR},
+                     createOwnerDirLedgerObject({ripple::uint256{kINDEX2}, ripple::uint256{kINDEX2}}, kINDEX1)
                          .getSerializer()
                          .peekData()},
                     // gets issuer account object
                     {ripple::keylet::account(account).key,
-                     CreateAccountRootObject(ACCOUNT, 0, 2, 200, 2, INDEX1, 2, TRANSFERRATEX2)
+                     createAccountRootObject(kACCOUNT, 0, 2, 200, 2, kINDEX1, 2, kTRANSFER_RATE_X2)
                          .getSerializer()
                          .peekData()},
                     // trust line between gets issuer and owner,owner has 30 USD
@@ -990,67 +1159,68 @@ generateNormalPathBookOffersTestBundles()
                                               gets10USDPays20XRPOffer
                 },
             .expectedJson = fmt::format(
-                R"({{
-                    "ledger_hash":"{}",
-                    "ledger_index":300,
+                R"JSON({{
+                    "ledger_hash": "{}",
+                    "ledger_index": 300,
                     "offers":
                     [
                         {{
-                            "Account":"{}",
-                            "BookDirectory":"{}",
-                            "BookNode":"0",
-                            "Flags":0,
-                            "LedgerEntryType":"Offer",
-                            "OwnerNode":"0",
-                            "PreviousTxnID":"0000000000000000000000000000000000000000000000000000000000000000",
-                            "PreviousTxnLgrSeq":0,
-                            "Sequence":0,
-                            "TakerPays":"20",
-                            "TakerGets":{{
-                                "currency":"USD",
-                                "issuer":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-                                "value":"10"
+                            "Account": "{}",
+                            "BookDirectory": "{}",
+                            "BookNode": "0",
+                            "Flags": 0,
+                            "LedgerEntryType": "Offer",
+                            "OwnerNode": "0",
+                            "PreviousTxnID": "0000000000000000000000000000000000000000000000000000000000000000",
+                            "PreviousTxnLgrSeq": 0,
+                            "Sequence": 0,
+                            "TakerPays": "20",
+                            "TakerGets": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "10"
                             }},
-                            "index":"E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
-                            "owner_funds":"{}",
-                            "quality":"{}"
+                            "index": "E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
+                            "owner_funds": "{}",
+                            "quality": "{}"
                         }},
                         {{
-                            "Account":"{}",
-                            "BookDirectory":"{}",
-                            "BookNode":"0",
-                            "Flags":0,
-                            "LedgerEntryType":"Offer",
-                            "OwnerNode":"0",
-                            "PreviousTxnID":"0000000000000000000000000000000000000000000000000000000000000000",
-                            "PreviousTxnLgrSeq":0,
-                            "Sequence":0,
-                            "TakerPays":"20",
-                            "TakerGets":{{
-                                "currency":"USD",
-                                "issuer":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-                                "value":"10"
+                            "Account": "{}",
+                            "BookDirectory": "{}",
+                            "BookNode": "0",
+                            "Flags": 0,
+                            "LedgerEntryType": "Offer",
+                            "OwnerNode": "0",
+                            "PreviousTxnID": "0000000000000000000000000000000000000000000000000000000000000000",
+                            "PreviousTxnLgrSeq": 0,
+                            "Sequence": 0,
+                            "TakerPays": "20",
+                            "TakerGets": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "10"
                             }},
-                            "index":"E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
-                            "taker_gets_funded":{{
-                                "currency":"USD",
-                                "issuer":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-                                "value":"5"
+                            "index": "E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
+                            "taker_gets_funded": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "5"
                             }},
-                            "taker_pays_funded":"10",
-                            "quality":"{}"
+                            "taker_pays_funded": "10",
+                            "quality": "{}"
                         }}
                     ]
-                }})",
-                LEDGERHASH,
-                ACCOUNT2,
-                PAYS20XRPGETS10USDBOOKDIR,
+                }})JSON",
+                kLEDGER_HASH,
+                kACCOUNT2,
+                kPAYS20_XRP_GETS10_USD_BOOK_DIR,
                 30,
                 2,
-                ACCOUNT2,
-                PAYS20XRPGETS10USDBOOKDIR,
+                kACCOUNT2,
+                kPAYS20_XRP_GETS10_USD_BOOK_DIR,
                 2
-            )
+            ),
+            .amendmentIsEnabledCalls = 1,
         },
         BookOffersNormalTestBundle{
             .testName = "PaysXRPGetsUSDSellingOwnCurrency",
@@ -1058,53 +1228,53 @@ generateNormalPathBookOffersTestBundles()
             // prepare offer dir index
             .mockedSuccessors =
                 std::map<ripple::uint256, std::optional<ripple::uint256>>{
-                    {getsUSDPaysXRPBook, ripple::uint256{PAYS20XRPGETS10USDBOOKDIR}},
-                    {ripple::uint256{PAYS20XRPGETS10USDBOOKDIR}, std::optional<ripple::uint256>{}}
+                    {getsUSDPaysXRPBook, ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR}},
+                    {ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR}, std::optional<ripple::uint256>{}}
                 },
             .mockedLedgerObjects =
                 std::map<ripple::uint256, ripple::Blob>{
                     // book dir object
-                    {ripple::uint256{PAYS20XRPGETS10USDBOOKDIR},
-                     CreateOwnerDirLedgerObject({ripple::uint256{INDEX2}}, INDEX1).getSerializer().peekData()},
+                    {ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR},
+                     createOwnerDirLedgerObject({ripple::uint256{kINDEX2}}, kINDEX1).getSerializer().peekData()},
                     // gets issuer account object, rate is 1/2
                     {ripple::keylet::account(account).key,
-                     CreateAccountRootObject(ACCOUNT, 0, 2, 200, 2, INDEX1, 2, TRANSFERRATEX2)
+                     createAccountRootObject(kACCOUNT, 0, 2, 200, 2, kINDEX1, 2, kTRANSFER_RATE_X2)
                          .getSerializer()
                          .peekData()},
                 },
             .ledgerObjectCalls = 3,
             .mockedOffers = std::vector<ripple::STObject>{gets10USDPays20XRPOwnerOffer},
             .expectedJson = fmt::format(
-                R"({{
-                    "ledger_hash":"{}",
-                    "ledger_index":300,
+                R"JSON({{
+                    "ledger_hash": "{}",
+                    "ledger_index": 300,
                     "offers":
                     [
                         {{
-                            "Account":"{}",
-                            "BookDirectory":"{}",
-                            "BookNode":"0",
-                            "Flags":0,
-                            "LedgerEntryType":"Offer",
-                            "OwnerNode":"0",
-                            "PreviousTxnID":"0000000000000000000000000000000000000000000000000000000000000000",
-                            "PreviousTxnLgrSeq":0,
-                            "Sequence":0,
-                            "TakerPays":"20",
-                            "TakerGets":{{
-                                "currency":"USD",
-                                "issuer":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-                                "value":"10"
+                            "Account": "{}",
+                            "BookDirectory": "{}",
+                            "BookNode": "0",
+                            "Flags": 0,
+                            "LedgerEntryType": "Offer",
+                            "OwnerNode": "0",
+                            "PreviousTxnID": "0000000000000000000000000000000000000000000000000000000000000000",
+                            "PreviousTxnLgrSeq": 0,
+                            "Sequence": 0,
+                            "TakerPays": "20",
+                            "TakerGets": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "10"
                             }},
-                            "index":"E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
-                            "owner_funds":"{}",
-                            "quality":"{}"
+                            "index": "E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
+                            "owner_funds": "{}",
+                            "quality": "{}"
                         }}
                     ]
-                }})",
-                LEDGERHASH,
-                ACCOUNT,
-                PAYS20XRPGETS10USDBOOKDIR,
+                }})JSON",
+                kLEDGER_HASH,
+                kACCOUNT,
+                kPAYS20_XRP_GETS10_USD_BOOK_DIR,
                 10,
                 2
             )
@@ -1115,17 +1285,17 @@ generateNormalPathBookOffersTestBundles()
             // prepare offer dir index
             .mockedSuccessors =
                 std::map<ripple::uint256, std::optional<ripple::uint256>>{
-                    {getsUSDPaysXRPBook, ripple::uint256{PAYS20XRPGETS10USDBOOKDIR}},
-                    {ripple::uint256{PAYS20XRPGETS10USDBOOKDIR}, std::optional<ripple::uint256>{}}
+                    {getsUSDPaysXRPBook, ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR}},
+                    {ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR}, std::optional<ripple::uint256>{}}
                 },
             .mockedLedgerObjects =
                 std::map<ripple::uint256, ripple::Blob>{
                     // book dir object
-                    {ripple::uint256{PAYS20XRPGETS10USDBOOKDIR},
-                     CreateOwnerDirLedgerObject({ripple::uint256{INDEX2}}, INDEX1).getSerializer().peekData()},
+                    {ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR},
+                     createOwnerDirLedgerObject({ripple::uint256{kINDEX2}}, kINDEX1).getSerializer().peekData()},
                     // gets issuer account object, rate is 1/2
                     {ripple::keylet::account(account).key,
-                     CreateAccountRootObject(ACCOUNT, 0, 2, 200, 2, INDEX1, 2, TRANSFERRATEX2)
+                     createAccountRootObject(kACCOUNT, 0, 2, 200, 2, kINDEX1, 2, kTRANSFER_RATE_X2)
                          .getSerializer()
                          .peekData()},
                     // trust line between gets issuer and owner,owner has 8 USD
@@ -1135,46 +1305,179 @@ generateNormalPathBookOffersTestBundles()
             .ledgerObjectCalls = 6,
             .mockedOffers = std::vector<ripple::STObject>{gets10USDPays20XRPOffer},
             .expectedJson = fmt::format(
-                R"({{
-                    "ledger_hash":"{}",
-                    "ledger_index":300,
+                R"JSON({{
+                    "ledger_hash": "{}",
+                    "ledger_index": 300,
                     "offers":
                     [
                         {{
-                            "Account":"{}",
-                            "BookDirectory":"{}",
-                            "BookNode":"0",
-                            "Flags":0,
-                            "LedgerEntryType":"Offer",
-                            "OwnerNode":"0",
-                            "PreviousTxnID":"0000000000000000000000000000000000000000000000000000000000000000",
-                            "PreviousTxnLgrSeq":0,
-                            "Sequence":0,
-                            "TakerPays":"20",
-                            "TakerGets":{{
-                                "currency":"USD",
-                                "issuer":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-                                "value":"10"
+                            "Account": "{}",
+                            "BookDirectory": "{}",
+                            "BookNode": "0",
+                            "Flags": 0,
+                            "LedgerEntryType": "Offer",
+                            "OwnerNode": "0",
+                            "PreviousTxnID": "0000000000000000000000000000000000000000000000000000000000000000",
+                            "PreviousTxnLgrSeq": 0,
+                            "Sequence": 0,
+                            "TakerPays": "20",
+                            "TakerGets": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "10"
                             }},
-                            "index":"E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
-                            "owner_funds":"{}",
-                            "quality":"{}",
-                            "taker_gets_funded":{{
-                                "currency":"USD",
-                                "issuer":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-                                "value":"0"
+                            "index": "E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
+                            "owner_funds": "{}",
+                            "quality": "{}",
+                            "taker_gets_funded": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "0"
                             }},
-                            "taker_pays_funded":"0"
+                            "taker_pays_funded": "0"
                         }}
                     ]
-                }})",
-                LEDGERHASH,
-                ACCOUNT2,
-                PAYS20XRPGETS10USDBOOKDIR,
+                }})JSON",
+                kLEDGER_HASH,
+                kACCOUNT2,
+                kPAYS20_XRP_GETS10_USD_BOOK_DIR,
+                0,
+                2
+            ),
+        },
+        BookOffersNormalTestBundle{
+            .testName = "PaysXRPGetsUSDIsDeepFrozen",
+            .inputJson = paysXRPGetsUSDInputJson,
+            // prepare offer dir index
+            .mockedSuccessors =
+                std::map<ripple::uint256, std::optional<ripple::uint256>>{
+                    {getsUSDPaysXRPBook, ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR}},
+                    {ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR}, std::optional<ripple::uint256>{}}
+                },
+            .mockedLedgerObjects =
+                std::map<ripple::uint256, ripple::Blob>{
+                    // book dir object
+                    {ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR},
+                     createOwnerDirLedgerObject({ripple::uint256{kINDEX2}}, kINDEX1).getSerializer().peekData()},
+                    // gets issuer account object, is deep frozen so unfunded
+                    {ripple::keylet::account(account).key,
+                     createAccountRootObject(
+                         kACCOUNT, ripple::lsfLowDeepFreeze, 2, 200, 2, kINDEX1, 2, kTRANSFER_RATE_X2
+                     )
+                         .getSerializer()
+                         .peekData()},
+                },
+            .ledgerObjectCalls = 4,
+            .mockedOffers = std::vector<ripple::STObject>{gets10USDPays20XRPOffer},
+            .expectedJson = fmt::format(
+                R"JSON({{
+                    "ledger_hash": "{}",
+                    "ledger_index": 300,
+                    "offers":
+                    [
+                        {{
+                            "Account": "{}",
+                            "BookDirectory": "{}",
+                            "BookNode": "0",
+                            "Flags": 0,
+                            "LedgerEntryType": "Offer",
+                            "OwnerNode": "0",
+                            "PreviousTxnID": "0000000000000000000000000000000000000000000000000000000000000000",
+                            "PreviousTxnLgrSeq": 0,
+                            "Sequence": 0,
+                            "TakerPays": "20",
+                            "TakerGets": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "10"
+                            }},
+                            "index": "E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
+                            "owner_funds": "{}",
+                            "quality": "{}",
+                            "taker_gets_funded": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "0"
+                            }},
+                            "taker_pays_funded": "0"
+                        }}
+                    ]
+                }})JSON",
+                kLEDGER_HASH,
+                kACCOUNT2,
+                kPAYS20_XRP_GETS10_USD_BOOK_DIR,
                 0,
                 2
             )
         },
+        BookOffersNormalTestBundle{
+            .testName = "PaysXRPGetsUSDTrustLineFrozenAndIsDeepFrozen",
+            .inputJson = paysXRPGetsUSDInputJson,
+            // prepare offer dir index
+            .mockedSuccessors =
+                std::map<ripple::uint256, std::optional<ripple::uint256>>{
+                    {getsUSDPaysXRPBook, ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR}},
+                    {ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR}, std::optional<ripple::uint256>{}}
+                },
+            .mockedLedgerObjects =
+                std::map<ripple::uint256, ripple::Blob>{
+                    // book dir object
+                    {ripple::uint256{kPAYS20_XRP_GETS10_USD_BOOK_DIR},
+                     createOwnerDirLedgerObject({ripple::uint256{kINDEX2}}, kINDEX1).getSerializer().peekData()},
+                    // gets issuer account object, is deep frozen so unfunded
+                    {ripple::keylet::account(account).key,
+                     createAccountRootObject(
+                         kACCOUNT, ripple::lsfLowDeepFreeze, 2, 200, 2, kINDEX1, 2, kTRANSFER_RATE_X2
+                     )
+                         .getSerializer()
+                         .peekData()},
+                    {ripple::keylet::line(account2, account, ripple::to_currency("USD")).key,
+                     frozenTrustLine.getSerializer().peekData()},
+
+                },
+            .ledgerObjectCalls = 6,
+            .mockedOffers = std::vector<ripple::STObject>{gets10USDPays20XRPOffer},
+            .expectedJson = fmt::format(
+                R"JSON({{
+                    "ledger_hash": "{}",
+                    "ledger_index": 300,
+                    "offers":
+                    [
+                        {{
+                            "Account": "{}",
+                            "BookDirectory": "{}",
+                            "BookNode": "0",
+                            "Flags": 0,
+                            "LedgerEntryType": "Offer",
+                            "OwnerNode": "0",
+                            "PreviousTxnID": "0000000000000000000000000000000000000000000000000000000000000000",
+                            "PreviousTxnLgrSeq": 0,
+                            "Sequence": 0,
+                            "TakerPays": "20",
+                            "TakerGets": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "10"
+                            }},
+                            "index": "E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321",
+                            "owner_funds": "{}",
+                            "quality": "{}",
+                            "taker_gets_funded": {{
+                                "currency": "USD",
+                                "issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+                                "value": "0"
+                            }},
+                            "taker_pays_funded": "0"
+                        }}
+                    ]
+                }})JSON",
+                kLEDGER_HASH,
+                kACCOUNT2,
+                kPAYS20_XRP_GETS10_USD_BOOK_DIR,
+                0,
+                2
+            )
+        }
     };
 }
 
@@ -1182,34 +1485,34 @@ INSTANTIATE_TEST_SUITE_P(
     RPCBookOffersHandler,
     RPCBookOffersNormalPathTest,
     testing::ValuesIn(generateNormalPathBookOffersTestBundles()),
-    tests::util::NameGenerator
+    tests::util::kNAME_GENERATOR
 );
 
 // ledger not exist
 TEST_F(RPCBookOffersHandlerTest, LedgerNonExistViaIntSequence)
 {
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
     // return empty ledgerHeader
-    ON_CALL(*backend, fetchLedgerBySequence(30, _)).WillByDefault(Return(std::optional<ripple::LedgerHeader>{}));
+    ON_CALL(*backend_, fetchLedgerBySequence(30, _)).WillByDefault(Return(std::optional<ripple::LedgerHeader>{}));
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
             "ledger_index": 30,
-            "taker_gets": 
+            "taker_gets":
             {{
                 "currency": "XRP"
             }},
-            "taker_pays": 
+            "taker_pays":
             {{
                 "currency": "USD",
                 "issuer": "{}"
             }}
-        }})",
-        ACCOUNT
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{BookOffersHandler{backend}};
+    auto const handler = AnyHandler{BookOffersHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](boost::asio::yield_context yield) {
-        auto const output = handler.process(input, Context{.yield = yield});
+        auto const output = handler.process(kINPUT, Context{.yield = yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "lgrNotFound");
@@ -1219,28 +1522,28 @@ TEST_F(RPCBookOffersHandlerTest, LedgerNonExistViaIntSequence)
 
 TEST_F(RPCBookOffersHandlerTest, LedgerNonExistViaSequence)
 {
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
     // return empty ledgerHeader
-    ON_CALL(*backend, fetchLedgerBySequence(30, _)).WillByDefault(Return(std::optional<ripple::LedgerHeader>{}));
+    ON_CALL(*backend_, fetchLedgerBySequence(30, _)).WillByDefault(Return(std::optional<ripple::LedgerHeader>{}));
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
             "ledger_index": "30",
-            "taker_gets": 
+            "taker_gets":
             {{
                 "currency": "XRP"
             }},
-            "taker_pays": 
+            "taker_pays":
             {{
                 "currency": "USD",
                 "issuer": "{}"
             }}
-        }})",
-        ACCOUNT
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{BookOffersHandler{backend}};
+    auto const handler = AnyHandler{BookOffersHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](boost::asio::yield_context yield) {
-        auto const output = handler.process(input, Context{.yield = yield});
+        auto const output = handler.process(kINPUT, Context{.yield = yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "lgrNotFound");
@@ -1250,30 +1553,30 @@ TEST_F(RPCBookOffersHandlerTest, LedgerNonExistViaSequence)
 
 TEST_F(RPCBookOffersHandlerTest, LedgerNonExistViaHash)
 {
-    EXPECT_CALL(*backend, fetchLedgerByHash).Times(1);
+    EXPECT_CALL(*backend_, fetchLedgerByHash).Times(1);
     // return empty ledgerHeader
-    ON_CALL(*backend, fetchLedgerByHash(ripple::uint256{LEDGERHASH}, _))
+    ON_CALL(*backend_, fetchLedgerByHash(ripple::uint256{kLEDGER_HASH}, _))
         .WillByDefault(Return(std::optional<ripple::LedgerHeader>{}));
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
             "ledger_hash": "{}",
-            "taker_gets": 
+            "taker_gets":
             {{
                 "currency": "XRP"
             }},
-            "taker_pays": 
+            "taker_pays":
             {{
                 "currency": "USD",
                 "issuer": "{}"
             }}
-        }})",
-        LEDGERHASH,
-        ACCOUNT
+        }})JSON",
+        kLEDGER_HASH,
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{BookOffersHandler{backend}};
+    auto const handler = AnyHandler{BookOffersHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](boost::asio::yield_context yield) {
-        auto const output = handler.process(input, Context{.yield = yield});
+        auto const output = handler.process(kINPUT, Context{.yield = yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "lgrNotFound");
@@ -1285,70 +1588,71 @@ TEST_F(RPCBookOffersHandlerTest, Limit)
 {
     auto const seq = 300;
 
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
     // return valid ledgerHeader
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, seq);
-    ON_CALL(*backend, fetchLedgerBySequence(seq, _)).WillByDefault(Return(ledgerHeader));
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, seq);
+    ON_CALL(*backend_, fetchLedgerBySequence(seq, _)).WillByDefault(Return(ledgerHeader));
 
-    auto const issuer = GetAccountIDWithString(ACCOUNT);
+    auto const issuer = getAccountIdWithString(kACCOUNT);
     // return valid book dir
-    EXPECT_CALL(*backend, doFetchSuccessorKey).Times(1);
+    EXPECT_CALL(*backend_, doFetchSuccessorKey).Times(1);
 
-    auto const getsXRPPaysUSDBook = getBookBase(std::get<ripple::Book>(
-        rpc::parseBook(ripple::to_currency("USD"), issuer, ripple::xrpCurrency(), ripple::xrpAccount())
-    ));
-    ON_CALL(*backend, doFetchSuccessorKey(getsXRPPaysUSDBook, seq, _))
-        .WillByDefault(Return(ripple::uint256{PAYS20USDGETS10XRPBOOKDIR}));
+    auto const getsXRPPaysUSDBook = getBookBase(
+        rpc::parseBook(ripple::to_currency("USD"), issuer, ripple::xrpCurrency(), ripple::xrpAccount(), std::nullopt)
+            .value()
+    );
+    ON_CALL(*backend_, doFetchSuccessorKey(getsXRPPaysUSDBook, seq, _))
+        .WillByDefault(Return(ripple::uint256{kPAYS20_USD_GETS10_XRP_BOOK_DIR}));
 
-    EXPECT_CALL(*backend, doFetchLedgerObject).Times(5);
-    auto const indexes = std::vector<ripple::uint256>(10, ripple::uint256{INDEX2});
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(5);
+    auto const indexes = std::vector<ripple::uint256>(10, ripple::uint256{kINDEX2});
 
-    ON_CALL(*backend, doFetchLedgerObject(ripple::uint256{PAYS20USDGETS10XRPBOOKDIR}, seq, _))
-        .WillByDefault(Return(CreateOwnerDirLedgerObject(indexes, INDEX1).getSerializer().peekData()));
-    ON_CALL(*backend, doFetchLedgerObject(ripple::keylet::account(GetAccountIDWithString(ACCOUNT2)).key, seq, _))
-        .WillByDefault(Return(CreateAccountRootObject(ACCOUNT2, 0, 2, 200, 2, INDEX1, 2).getSerializer().peekData()));
+    ON_CALL(*backend_, doFetchLedgerObject(ripple::uint256{kPAYS20_USD_GETS10_XRP_BOOK_DIR}, seq, _))
+        .WillByDefault(Return(createOwnerDirLedgerObject(indexes, kINDEX1).getSerializer().peekData()));
+    ON_CALL(*backend_, doFetchLedgerObject(ripple::keylet::account(getAccountIdWithString(kACCOUNT2)).key, seq, _))
+        .WillByDefault(Return(createAccountRootObject(kACCOUNT2, 0, 2, 200, 2, kINDEX1, 2).getSerializer().peekData()));
 
-    ON_CALL(*backend, doFetchLedgerObject(ripple::keylet::fees().key, seq, _))
-        .WillByDefault(Return(CreateLegacyFeeSettingBlob(1, 2, 3, 4, 0)));
+    ON_CALL(*backend_, doFetchLedgerObject(ripple::keylet::fees().key, seq, _))
+        .WillByDefault(Return(createLegacyFeeSettingBlob(1, 2, 3, 4, 0)));
 
-    ON_CALL(*backend, doFetchLedgerObject(ripple::keylet::account(issuer).key, seq, _))
-        .WillByDefault(
-            Return(CreateAccountRootObject(ACCOUNT, 0, 2, 200, 2, INDEX1, 2, TRANSFERRATEX2).getSerializer().peekData())
-        );
+    ON_CALL(*backend_, doFetchLedgerObject(ripple::keylet::account(issuer).key, seq, _))
+        .WillByDefault(Return(
+            createAccountRootObject(kACCOUNT, 0, 2, 200, 2, kINDEX1, 2, kTRANSFER_RATE_X2).getSerializer().peekData()
+        ));
 
-    auto const gets10XRPPays20USDOffer = CreateOfferLedgerObject(
-        ACCOUNT2,
+    auto const gets10XRPPays20USDOffer = createOfferLedgerObject(
+        kACCOUNT2,
         10,
         20,
         ripple::to_string(ripple::xrpCurrency()),
         ripple::to_string(ripple::to_currency("USD")),
         toBase58(ripple::xrpAccount()),
-        ACCOUNT,
-        PAYS20USDGETS10XRPBOOKDIR
+        kACCOUNT,
+        kPAYS20_USD_GETS10_XRP_BOOK_DIR
     );
 
     std::vector<Blob> const bbs(10, gets10XRPPays20USDOffer.getSerializer().peekData());
-    ON_CALL(*backend, doFetchLedgerObjects).WillByDefault(Return(bbs));
-    EXPECT_CALL(*backend, doFetchLedgerObjects).Times(1);
+    ON_CALL(*backend_, doFetchLedgerObjects).WillByDefault(Return(bbs));
+    EXPECT_CALL(*backend_, doFetchLedgerObjects).Times(1);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
-            "taker_gets": 
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
+            "taker_gets":
             {{
                 "currency": "XRP"
             }},
-            "taker_pays": 
+            "taker_pays":
             {{
                 "currency": "USD",
                 "issuer": "{}"
             }},
             "limit": 5
-        }})",
-        ACCOUNT
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{BookOffersHandler{backend}};
+    auto const handler = AnyHandler{BookOffersHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](boost::asio::yield_context yield) {
-        auto const output = handler.process(input, Context{.yield = yield});
+        auto const output = handler.process(kINPUT, Context{.yield = yield});
         ASSERT_TRUE(output);
         EXPECT_EQ(output.result.value().as_object().at("offers").as_array().size(), 5);
     });
@@ -1358,72 +1662,73 @@ TEST_F(RPCBookOffersHandlerTest, LimitMoreThanMax)
 {
     auto const seq = 300;
 
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
     // return valid ledgerHeader
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, seq);
-    ON_CALL(*backend, fetchLedgerBySequence(seq, _)).WillByDefault(Return(ledgerHeader));
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, seq);
+    ON_CALL(*backend_, fetchLedgerBySequence(seq, _)).WillByDefault(Return(ledgerHeader));
 
-    auto const issuer = GetAccountIDWithString(ACCOUNT);
+    auto const issuer = getAccountIdWithString(kACCOUNT);
     // return valid book dir
-    EXPECT_CALL(*backend, doFetchSuccessorKey).Times(1);
+    EXPECT_CALL(*backend_, doFetchSuccessorKey).Times(1);
 
-    auto const getsXRPPaysUSDBook = getBookBase(std::get<ripple::Book>(
-        rpc::parseBook(ripple::to_currency("USD"), issuer, ripple::xrpCurrency(), ripple::xrpAccount())
-    ));
-    ON_CALL(*backend, doFetchSuccessorKey(getsXRPPaysUSDBook, seq, _))
-        .WillByDefault(Return(ripple::uint256{PAYS20USDGETS10XRPBOOKDIR}));
+    auto const getsXRPPaysUSDBook = getBookBase(
+        rpc::parseBook(ripple::to_currency("USD"), issuer, ripple::xrpCurrency(), ripple::xrpAccount(), std::nullopt)
+            .value()
+    );
+    ON_CALL(*backend_, doFetchSuccessorKey(getsXRPPaysUSDBook, seq, _))
+        .WillByDefault(Return(ripple::uint256{kPAYS20_USD_GETS10_XRP_BOOK_DIR}));
 
-    EXPECT_CALL(*backend, doFetchLedgerObject).Times(5);
-    auto const indexes = std::vector<ripple::uint256>(BookOffersHandler::LIMIT_MAX + 1, ripple::uint256{INDEX2});
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(5);
+    auto const indexes = std::vector<ripple::uint256>(BookOffersHandler::kLIMIT_MAX + 1, ripple::uint256{kINDEX2});
 
-    ON_CALL(*backend, doFetchLedgerObject(ripple::uint256{PAYS20USDGETS10XRPBOOKDIR}, seq, _))
-        .WillByDefault(Return(CreateOwnerDirLedgerObject(indexes, INDEX1).getSerializer().peekData()));
-    ON_CALL(*backend, doFetchLedgerObject(ripple::keylet::account(GetAccountIDWithString(ACCOUNT2)).key, seq, _))
-        .WillByDefault(Return(CreateAccountRootObject(ACCOUNT2, 0, 2, 200, 2, INDEX1, 2).getSerializer().peekData()));
+    ON_CALL(*backend_, doFetchLedgerObject(ripple::uint256{kPAYS20_USD_GETS10_XRP_BOOK_DIR}, seq, _))
+        .WillByDefault(Return(createOwnerDirLedgerObject(indexes, kINDEX1).getSerializer().peekData()));
+    ON_CALL(*backend_, doFetchLedgerObject(ripple::keylet::account(getAccountIdWithString(kACCOUNT2)).key, seq, _))
+        .WillByDefault(Return(createAccountRootObject(kACCOUNT2, 0, 2, 200, 2, kINDEX1, 2).getSerializer().peekData()));
 
-    ON_CALL(*backend, doFetchLedgerObject(ripple::keylet::fees().key, seq, _))
-        .WillByDefault(Return(CreateLegacyFeeSettingBlob(1, 2, 3, 4, 0)));
+    ON_CALL(*backend_, doFetchLedgerObject(ripple::keylet::fees().key, seq, _))
+        .WillByDefault(Return(createLegacyFeeSettingBlob(1, 2, 3, 4, 0)));
 
-    ON_CALL(*backend, doFetchLedgerObject(ripple::keylet::account(issuer).key, seq, _))
-        .WillByDefault(
-            Return(CreateAccountRootObject(ACCOUNT, 0, 2, 200, 2, INDEX1, 2, TRANSFERRATEX2).getSerializer().peekData())
-        );
+    ON_CALL(*backend_, doFetchLedgerObject(ripple::keylet::account(issuer).key, seq, _))
+        .WillByDefault(Return(
+            createAccountRootObject(kACCOUNT, 0, 2, 200, 2, kINDEX1, 2, kTRANSFER_RATE_X2).getSerializer().peekData()
+        ));
 
-    auto const gets10XRPPays20USDOffer = CreateOfferLedgerObject(
-        ACCOUNT2,
+    auto const gets10XRPPays20USDOffer = createOfferLedgerObject(
+        kACCOUNT2,
         10,
         20,
         ripple::to_string(ripple::xrpCurrency()),
         ripple::to_string(ripple::to_currency("USD")),
         toBase58(ripple::xrpAccount()),
-        ACCOUNT,
-        PAYS20USDGETS10XRPBOOKDIR
+        kACCOUNT,
+        kPAYS20_USD_GETS10_XRP_BOOK_DIR
     );
 
-    std::vector<Blob> const bbs(BookOffersHandler::LIMIT_MAX + 1, gets10XRPPays20USDOffer.getSerializer().peekData());
-    ON_CALL(*backend, doFetchLedgerObjects).WillByDefault(Return(bbs));
-    EXPECT_CALL(*backend, doFetchLedgerObjects).Times(1);
+    std::vector<Blob> const bbs(BookOffersHandler::kLIMIT_MAX + 1, gets10XRPPays20USDOffer.getSerializer().peekData());
+    ON_CALL(*backend_, doFetchLedgerObjects).WillByDefault(Return(bbs));
+    EXPECT_CALL(*backend_, doFetchLedgerObjects).Times(1);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
-            "taker_gets": 
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
+            "taker_gets":
             {{
                 "currency": "XRP"
             }},
-            "taker_pays": 
+            "taker_pays":
             {{
                 "currency": "USD",
                 "issuer": "{}"
             }},
             "limit": {}
-        }})",
-        ACCOUNT,
-        BookOffersHandler::LIMIT_MAX + 1
+        }})JSON",
+        kACCOUNT,
+        BookOffersHandler::kLIMIT_MAX + 1
     ));
-    auto const handler = AnyHandler{BookOffersHandler{backend}};
+    auto const handler = AnyHandler{BookOffersHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](boost::asio::yield_context yield) {
-        auto const output = handler.process(input, Context{.yield = yield});
+        auto const output = handler.process(kINPUT, Context{.yield = yield});
         ASSERT_TRUE(output);
-        EXPECT_EQ(output.result.value().as_object().at("offers").as_array().size(), BookOffersHandler::LIMIT_MAX);
+        EXPECT_EQ(output.result.value().as_object().at("offers").as_array().size(), BookOffersHandler::kLIMIT_MAX);
     });
 }

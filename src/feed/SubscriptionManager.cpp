@@ -50,7 +50,7 @@ void
 SubscriptionManager::pubBookChanges(
     ripple::LedgerHeader const& lgrInfo,
     std::vector<data::TransactionAndMetadata> const& transactions
-) const
+)
 {
     bookChangesFeed_.pub(lgrInfo, transactions);
 }
@@ -111,7 +111,7 @@ SubscriptionManager::pubLedger(
     ripple::Fees const& fees,
     std::string const& ledgerRange,
     std::uint32_t const txnCount
-) const
+)
 {
     ledgerFeed_.pub(lgrInfo, fees, ledgerRange, txnCount);
 }
@@ -129,7 +129,7 @@ SubscriptionManager::unsubManifest(SubscriberSharedPtr const& subscriber)
 }
 
 void
-SubscriptionManager::forwardManifest(boost::json::object const& manifestJson) const
+SubscriptionManager::forwardManifest(boost::json::object const& manifestJson)
 {
     manifestFeed_.pub(manifestJson);
 }
@@ -147,7 +147,7 @@ SubscriptionManager::unsubValidation(SubscriberSharedPtr const& subscriber)
 }
 
 void
-SubscriptionManager::forwardValidation(boost::json::object const& validationJson) const
+SubscriptionManager::forwardValidation(boost::json::object const& validationJson)
 {
     validationsFeed_.pub(validationJson);
 }
@@ -191,7 +191,7 @@ SubscriptionManager::unsubBook(ripple::Book const& book, SubscriberSharedPtr con
 void
 SubscriptionManager::pubTransaction(data::TransactionAndMetadata const& txMeta, ripple::LedgerHeader const& lgrInfo)
 {
-    transactionFeed_.pub(txMeta, lgrInfo, backend_);
+    transactionFeed_.pub(txMeta, lgrInfo, backend_, amendmentCenter_, networkID_);
 }
 
 boost::json::object
@@ -208,6 +208,18 @@ SubscriptionManager::report() const
         {"books", transactionFeed_.bookSubCount()},
         {"book_changes", bookChangesFeed_.count()},
     };
+}
+
+void
+SubscriptionManager::setNetworkID(uint32_t const networkID)
+{
+    networkID_ = networkID;
+}
+
+uint32_t
+SubscriptionManager::getNetworkID() const
+{
+    return networkID_;
 }
 
 }  // namespace feed

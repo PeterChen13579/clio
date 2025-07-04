@@ -29,6 +29,7 @@
 #include <xrpl/proto/org/xrpl/rpc/v1/ledger.pb.h>
 #include <xrpl/protocol/LedgerHeader.h>
 #include <xrpl/protocol/STTx.h>
+#include <xrpl/protocol/Serializer.h>
 #include <xrpl/protocol/TxFormats.h>
 #include <xrpl/protocol/TxMeta.h>
 
@@ -49,7 +50,7 @@ namespace etlng::model {
 template <ripple::TxType... Types>
     requires(util::hasNoDuplicates(Types...))
 struct Spec {
-    static constexpr bool SpecTag = true;
+    static constexpr bool kSPEC_TAG = true;
 
     /**
      * @brief Checks if the transaction type was requested.
@@ -57,7 +58,7 @@ struct Spec {
      * @param type The transaction type
      * @return true if the transaction was requested; false otherwise
      */
-    [[nodiscard]] constexpr static bool
+    [[nodiscard]] static constexpr bool
     wants(ripple::TxType type) noexcept
     {
         return ((Types == type) || ...);
@@ -79,6 +80,23 @@ struct Transaction {
     ripple::uint256 id;
     std::string key;  // key is the above id as a string of 32 characters
     ripple::TxType type;
+
+    /**
+     * @brief Compares Transaction objects to each other without considering sttx and meta fields
+     * @param other The Transaction to compare to
+     * @return true if transaction is equivalent; false otherwise
+     */
+    bool
+    operator==(Transaction const& other) const
+    {
+        return raw == other.raw                                           //
+            and metaRaw == other.metaRaw                                  //
+            and sttx.getTransactionID() == other.sttx.getTransactionID()  //
+            and meta.getTxID() == other.meta.getTxID()                    //
+            and id == other.id                                            //
+            and key == other.key                                          //
+            and type == other.type;
+    }
 };
 
 /**
@@ -103,6 +121,9 @@ struct Object {
     std::string predecessor;
 
     ModType type;
+
+    bool
+    operator==(Object const&) const = default;
 };
 
 /**
@@ -111,6 +132,9 @@ struct Object {
 struct BookSuccessor {
     std::string firstBook;
     std::string bookBase;
+
+    bool
+    operator==(BookSuccessor const&) const = default;
 };
 
 /**
@@ -124,6 +148,45 @@ struct LedgerData {
 
     ripple::LedgerHeader header;
     std::string rawHeader;
+    uint32_t seq;
+
+    /**
+     * @brief Compares LedgerData objects to each other without considering the header field
+     * @param other The LedgerData to compare to
+     * @return true if data is equivalent; false otherwise
+     */
+    bool
+    operator==(LedgerData const& other) const
+    {
+        auto const serialized = [](auto const& hdr) {
+            ripple::Serializer ser;
+            ripple::addRaw(hdr, ser);
+            return ser.getString();
+        };
+
+        return transactions == other.transactions               //
+            and objects == other.objects                        //
+            and successors == other.successors                  //
+            and edgeKeys == other.edgeKeys                      //
+            and serialized(header) == serialized(other.header)  //
+            and rawHeader == other.rawHeader                    //
+            and seq == other.seq;
+    }
+};
+
+/**
+ * @brief Represents a task for the extractors
+ */
+struct Task {
+    /**
+     * @brief Represents the priority of the task
+     */
+    enum class Priority : uint8_t {
+        Lower = 0u,
+        Higher = 1u,
+    };
+
+    Priority priority;
     uint32_t seq;
 };
 

@@ -45,7 +45,6 @@
 #include <ranges>
 #include <string>
 #include <utility>
-#include <variant>
 #include <vector>
 
 namespace rpc {
@@ -59,14 +58,14 @@ FeatureHandler::process(FeatureHandler::Input input, Context const& ctx) const
     auto const range = sharedPtrBackend_->fetchLedgerRange();
     ASSERT(range.has_value(), "Feature's ledger range must be available");
 
-    auto const lgrInfoOrStatus = getLedgerHeaderFromHashOrSeq(
+    auto const expectedLgrInfo = getLedgerHeaderFromHashOrSeq(
         *sharedPtrBackend_, ctx.yield, input.ledgerHash, input.ledgerIndex, range->maxSequence
     );
 
-    if (auto const status = std::get_if<Status>(&lgrInfoOrStatus))
-        return Error{*status};
+    if (!expectedLgrInfo.has_value())
+        return Error{expectedLgrInfo.error()};
 
-    auto const lgrInfo = std::get<ripple::LedgerHeader>(lgrInfoOrStatus);
+    auto const& lgrInfo = expectedLgrInfo.value();
     auto const& all = amendmentCenter_->getAll();
 
     auto searchPredicate = [search = input.feature](auto const& feature) {
@@ -112,17 +111,17 @@ FeatureHandler::process(FeatureHandler::Input input, Context const& ctx) const
 RpcSpecConstRef
 FeatureHandler::spec([[maybe_unused]] uint32_t apiVersion)
 {
-    static RpcSpec const rpcSpec = {
+    static RpcSpec const kRPC_SPEC = {
         {JS(feature), validation::Type<std::string>{}},
         {JS(vetoed),
          meta::WithCustomError{
              validation::NotSupported{},
              Status(RippledError::rpcNO_PERMISSION, "The admin portion of feature API is not available through Clio.")
          }},
-        {JS(ledger_hash), validation::CustomValidators::Uint256HexStringValidator},
-        {JS(ledger_index), validation::CustomValidators::LedgerIndexValidator},
+        {JS(ledger_hash), validation::CustomValidators::uint256HexStringValidator},
+        {JS(ledger_index), validation::CustomValidators::ledgerIndexValidator},
     };
-    return rpcSpec;
+    return kRPC_SPEC;
 }
 
 void

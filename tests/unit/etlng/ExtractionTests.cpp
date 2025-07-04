@@ -24,10 +24,13 @@
 #include "etlng/impl/Extraction.hpp"
 #include "util/BinaryTestObject.hpp"
 #include "util/LoggerFixtures.hpp"
+#include "util/MockAssert.hpp"
+#include "util/TestObject.hpp"
 
 #include <gmock/gmock.h>
 #include <google/protobuf/repeated_ptr_field.h>
 #include <gtest/gtest.h>
+#include <xrpl/basics/base_uint.h>
 #include <xrpl/basics/strHex.h>
 #include <xrpl/proto/org/xrpl/rpc/v1/get_ledger.pb.h>
 #include <xrpl/proto/org/xrpl/rpc/v1/ledger.pb.h>
@@ -38,14 +41,146 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace {
-constinit auto const Seq = 30;
+constinit auto const kLEDGER_HASH = "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652";
+constinit auto const kLEDGER_HASH2 = "1B8590C01B0006EDFA9ED60296DD052DC5E90F99659B25014D08E1BC983515BC";
+constinit auto const kSEQ = 30;
 }  // namespace
 
-struct ExtractionTests : NoLoggerFixture {};
+struct ExtractionModelNgTests : NoLoggerFixture {};
 
-TEST_F(ExtractionTests, ModType)
+TEST_F(ExtractionModelNgTests, LedgerDataCopyableAndEquatable)
+{
+    auto const first = etlng::model::LedgerData{
+        .transactions =
+            {util::createTransaction(ripple::TxType::ttNFTOKEN_BURN),
+             util::createTransaction(ripple::TxType::ttNFTOKEN_BURN),
+             util::createTransaction(ripple::TxType::ttNFTOKEN_CREATE_OFFER)},
+        .objects = {util::createObject(), util::createObject(), util::createObject()},
+        .successors = std::vector<etlng::model::BookSuccessor>{{.firstBook = "first", .bookBase = "base"}},
+        .edgeKeys = std::vector<std::string>{"key1", "key2"},
+        .header = createLedgerHeader(kLEDGER_HASH, kSEQ, 1),
+        .rawHeader = {1, 2, 3},
+        .seq = kSEQ
+    };
+
+    auto const second = first;
+    EXPECT_EQ(first, second);
+
+    {
+        auto third = second;
+        third.transactions.clear();
+        EXPECT_NE(first, third);
+    }
+    {
+        auto third = second;
+        third.objects = {util::createObject()};
+        EXPECT_NE(first, third);
+    }
+    {
+        auto third = second;
+        third.successors = std::vector<etlng::model::BookSuccessor>{{.firstBook = "second", .bookBase = "base"}};
+        EXPECT_NE(first, third);
+    }
+    {
+        auto third = second;
+        third.edgeKeys = std::vector<std::string>{"key1"};
+        EXPECT_NE(first, third);
+    }
+    {
+        auto third = second;
+        third.header = createLedgerHeader(kLEDGER_HASH2, kSEQ, 100);  // Using large age value to avoid flaky test
+        EXPECT_NE(first, third);
+    }
+    {
+        auto third = second;
+        third.rawHeader = {2, 3, 4};
+        EXPECT_NE(first, third);
+    }
+    {
+        auto third = second;
+        third.seq = kSEQ - 1;
+        EXPECT_NE(first, third);
+    }
+}
+
+TEST_F(ExtractionModelNgTests, TransactionIsEquatable)
+{
+    auto const tx = std::vector{util::createTransaction(ripple::TxType::ttNFTOKEN_BURN)};
+    auto other = tx;
+    EXPECT_EQ(tx, other);
+
+    other.push_back(util::createTransaction(ripple::TxType::ttNFTOKEN_ACCEPT_OFFER));
+    EXPECT_NE(tx, other);
+}
+
+TEST_F(ExtractionModelNgTests, ObjectCopyableAndEquatable)
+{
+    auto const obj = util::createObject();
+    auto const other = obj;
+    EXPECT_EQ(obj, other);
+
+    {
+        auto third = other;
+        third.key = ripple::uint256{42};
+        EXPECT_NE(obj, third);
+    }
+    {
+        auto third = other;
+        third.keyRaw = "key";
+        EXPECT_NE(obj, third);
+    }
+    {
+        auto third = other;
+        third.data = {2, 3};
+        EXPECT_NE(obj, third);
+    }
+    {
+        auto third = other;
+        third.dataRaw = "something";
+        EXPECT_NE(obj, third);
+    }
+    {
+        auto third = other;
+        third.successor = "succ";
+        EXPECT_NE(obj, third);
+    }
+    {
+        auto third = other;
+        third.predecessor = "pred";
+        EXPECT_NE(obj, third);
+    }
+    {
+        auto third = other;
+        third.type = etlng::model::Object::ModType::Deleted;
+        EXPECT_NE(obj, third);
+    }
+}
+
+TEST_F(ExtractionModelNgTests, BookSuccessorCopyableAndEquatable)
+{
+    auto const succ = etlng::model::BookSuccessor{.firstBook = "first", .bookBase = "base"};
+    auto const other = succ;
+    EXPECT_EQ(succ, other);
+
+    {
+        auto third = other;
+        third.bookBase = "all your base are belong to us";
+        EXPECT_NE(succ, third);
+    }
+    {
+        auto third = other;
+        third.firstBook = "not the first book";
+        EXPECT_NE(succ, third);
+    }
+}
+
+struct ExtractionNgTests : NoLoggerFixture {};
+
+TEST_F(ExtractionNgTests, ModType)
 {
     using namespace etlng::impl;
     using ModType = etlng::model::Object::ModType;
@@ -56,32 +191,32 @@ TEST_F(ExtractionTests, ModType)
     EXPECT_EQ(extractModType(PBObjType::UNSPECIFIED), ModType::Unspecified);
 }
 
-TEST_F(ExtractionTests, OneTransaction)
+TEST_F(ExtractionNgTests, OneTransaction)
 {
     using namespace etlng::impl;
 
-    auto expected = util::CreateTransaction(ripple::TxType::ttNFTOKEN_CREATE_OFFER);
+    auto expected = util::createTransaction(ripple::TxType::ttNFTOKEN_CREATE_OFFER);
 
     auto original = org::xrpl::rpc::v1::TransactionAndMetadata();
-    auto [metaRaw, txRaw] = util::CreateNftTxAndMetaBlobs();
+    auto [metaRaw, txRaw] = util::createTxAndMetaBlobs();
     original.set_transaction_blob(txRaw);
     original.set_metadata_blob(metaRaw);
 
-    auto res = extractTx(original, Seq);
-    EXPECT_EQ(res.meta.getLgrSeq(), Seq);
+    auto res = extractTx(original, kSEQ);
+    EXPECT_EQ(res.meta.getLgrSeq(), kSEQ);
     EXPECT_EQ(res.meta.getLgrSeq(), expected.meta.getLgrSeq());
     EXPECT_EQ(res.meta.getTxID(), expected.meta.getTxID());
     EXPECT_EQ(res.sttx.getTxnType(), expected.sttx.getTxnType());
 }
 
-TEST_F(ExtractionTests, MultipleTransactions)
+TEST_F(ExtractionNgTests, MultipleTransactions)
 {
     using namespace etlng::impl;
 
-    auto expected = util::CreateTransaction(ripple::TxType::ttNFTOKEN_CREATE_OFFER);
+    auto expected = util::createTransaction(ripple::TxType::ttNFTOKEN_CREATE_OFFER);
 
     auto original = org::xrpl::rpc::v1::TransactionAndMetadata();
-    auto [metaRaw, txRaw] = util::CreateNftTxAndMetaBlobs();
+    auto [metaRaw, txRaw] = util::createTxAndMetaBlobs();
     original.set_transaction_blob(txRaw);
     original.set_metadata_blob(metaRaw);
 
@@ -91,44 +226,50 @@ TEST_F(ExtractionTests, MultipleTransactions)
         *p = original;
     }
 
-    auto res = extractTxs(list.transactions(), Seq);
+    auto res = extractTxs(list.transactions(), kSEQ);
     EXPECT_EQ(res.size(), 10);
 
     for (auto const& tx : res) {
-        EXPECT_EQ(tx.meta.getLgrSeq(), Seq);
+        EXPECT_EQ(tx.meta.getLgrSeq(), kSEQ);
         EXPECT_EQ(tx.meta.getLgrSeq(), expected.meta.getLgrSeq());
         EXPECT_EQ(tx.meta.getTxID(), expected.meta.getTxID());
         EXPECT_EQ(tx.sttx.getTxnType(), expected.sttx.getTxnType());
     }
 }
 
-TEST_F(ExtractionTests, OneObject)
+TEST_F(ExtractionNgTests, OneObject)
 {
     using namespace etlng::impl;
 
-    auto expected = util::CreateObject();
+    auto expected = util::createObject();
     auto original = org::xrpl::rpc::v1::RawLedgerObject();
     original.set_data(expected.dataRaw);
     original.set_key(expected.keyRaw);
+    original.set_mod_type(
+        org::xrpl::rpc::v1::RawLedgerObject::ModificationType::RawLedgerObject_ModificationType_CREATED
+    );
 
     auto res = extractObj(original);
     EXPECT_EQ(ripple::strHex(res.key), ripple::strHex(expected.keyRaw));
     EXPECT_EQ(ripple::strHex(res.data), ripple::strHex(expected.dataRaw));
-    EXPECT_EQ(res.predecessor, uint256ToString(data::lastKey));
-    EXPECT_EQ(res.successor, uint256ToString(data::firstKey));
+    EXPECT_EQ(res.predecessor, uint256ToString(data::kLAST_KEY));
+    EXPECT_EQ(res.successor, uint256ToString(data::kFIRST_KEY));
     EXPECT_EQ(res.type, expected.type);
 }
 
-TEST_F(ExtractionTests, OneObjectWithSuccessorAndPredecessor)
+TEST_F(ExtractionNgTests, OneObjectWithSuccessorAndPredecessor)
 {
     using namespace etlng::impl;
 
-    auto expected = util::CreateObject();
+    auto expected = util::createObject();
     auto original = org::xrpl::rpc::v1::RawLedgerObject();
     original.set_data(expected.dataRaw);
     original.set_key(expected.keyRaw);
     original.set_predecessor(expected.predecessor);
     original.set_successor(expected.successor);
+    original.set_mod_type(
+        org::xrpl::rpc::v1::RawLedgerObject::ModificationType::RawLedgerObject_ModificationType_CREATED
+    );
 
     auto res = extractObj(original);
     EXPECT_EQ(ripple::strHex(res.key), ripple::strHex(expected.keyRaw));
@@ -138,14 +279,17 @@ TEST_F(ExtractionTests, OneObjectWithSuccessorAndPredecessor)
     EXPECT_EQ(res.type, expected.type);
 }
 
-TEST_F(ExtractionTests, MultipleObjects)
+TEST_F(ExtractionNgTests, MultipleObjects)
 {
     using namespace etlng::impl;
 
-    auto expected = util::CreateObject();
+    auto expected = util::createObject();
     auto original = org::xrpl::rpc::v1::RawLedgerObject();
     original.set_data(expected.dataRaw);
     original.set_key(expected.keyRaw);
+    original.set_mod_type(
+        org::xrpl::rpc::v1::RawLedgerObject::ModificationType::RawLedgerObject_ModificationType_CREATED
+    );
 
     auto list = org::xrpl::rpc::v1::RawLedgerObjects();
     for (auto i = 0; i < 10; ++i) {
@@ -159,17 +303,17 @@ TEST_F(ExtractionTests, MultipleObjects)
     for (auto const& obj : res) {
         EXPECT_EQ(ripple::strHex(obj.key), ripple::strHex(expected.keyRaw));
         EXPECT_EQ(ripple::strHex(obj.data), ripple::strHex(expected.dataRaw));
-        EXPECT_EQ(obj.predecessor, uint256ToString(data::lastKey));
-        EXPECT_EQ(obj.successor, uint256ToString(data::firstKey));
+        EXPECT_EQ(obj.predecessor, uint256ToString(data::kLAST_KEY));
+        EXPECT_EQ(obj.successor, uint256ToString(data::kFIRST_KEY));
         EXPECT_EQ(obj.type, expected.type);
     }
 }
 
-TEST_F(ExtractionTests, OneSuccessor)
+TEST_F(ExtractionNgTests, OneSuccessor)
 {
     using namespace etlng::impl;
 
-    auto expected = util::CreateSuccessor();
+    auto expected = util::createSuccessor();
     auto original = org::xrpl::rpc::v1::BookSuccessor();
     original.set_first_book(expected.firstBook);
     original.set_book_base(expected.bookBase);
@@ -179,11 +323,11 @@ TEST_F(ExtractionTests, OneSuccessor)
     EXPECT_EQ(ripple::strHex(res.bookBase), ripple::strHex(expected.bookBase));
 }
 
-TEST_F(ExtractionTests, MultipleSuccessors)
+TEST_F(ExtractionNgTests, MultipleSuccessors)
 {
     using namespace etlng::impl;
 
-    auto expected = util::CreateSuccessor();
+    auto expected = util::createSuccessor();
     auto original = org::xrpl::rpc::v1::BookSuccessor();
     original.set_first_book(expected.firstBook);
     original.set_book_base(expected.bookBase);
@@ -205,7 +349,7 @@ TEST_F(ExtractionTests, MultipleSuccessors)
     }
 }
 
-TEST_F(ExtractionTests, SuccessorsWithNoNeighborsIncluded)
+TEST_F(ExtractionNgTests, SuccessorsWithNoNeighborsIncluded)
 {
     using namespace etlng::impl;
 
@@ -216,21 +360,17 @@ TEST_F(ExtractionTests, SuccessorsWithNoNeighborsIncluded)
     ASSERT_FALSE(res.has_value());
 }
 
-struct ExtractionDeathTest : NoLoggerFixture {};
+struct ExtractionAssertTest : common::util::WithMockAssert, NoLoggerFixture {};
 
-TEST_F(ExtractionDeathTest, InvalidModTypeAsserts)
+TEST_F(ExtractionAssertTest, InvalidModTypeAsserts)
 {
     using namespace etlng::impl;
 
-    EXPECT_DEATH(
-        {
-            [[maybe_unused]] auto _ = extractModType(
-                PBModType::
-                    RawLedgerObject_ModificationType_RawLedgerObject_ModificationType_INT_MIN_SENTINEL_DO_NOT_USE_
-            );
-        },
-        ".*"
-    );
+    EXPECT_CLIO_ASSERT_FAIL({
+        [[maybe_unused]] auto _ = extractModType(
+            PBModType::RawLedgerObject_ModificationType_RawLedgerObject_ModificationType_INT_MIN_SENTINEL_DO_NOT_USE_
+        );
+    });
 }
 
 struct MockFetcher : etl::LedgerFetcherInterface {
@@ -238,31 +378,31 @@ struct MockFetcher : etl::LedgerFetcherInterface {
     MOCK_METHOD(std::optional<GetLedgerResponseType>, fetchDataAndDiff, (uint32_t), (override));
 };
 
-struct ExtractorTests : ExtractionTests {
+struct ExtractorTests : ExtractionNgTests {
     std::shared_ptr<MockFetcher> fetcher = std::make_shared<MockFetcher>();
     etlng::impl::Extractor extractor{fetcher};
 };
 
 TEST_F(ExtractorTests, ExtractLedgerWithDiffNoResult)
 {
-    EXPECT_CALL(*fetcher, fetchDataAndDiff(Seq)).WillOnce(testing::Return(std::nullopt));
-    auto res = extractor.extractLedgerWithDiff(Seq);
+    EXPECT_CALL(*fetcher, fetchDataAndDiff(kSEQ)).WillOnce(testing::Return(std::nullopt));
+    auto res = extractor.extractLedgerWithDiff(kSEQ);
     EXPECT_FALSE(res.has_value());
 }
 
 TEST_F(ExtractorTests, ExtractLedgerOnlyNoResult)
 {
-    EXPECT_CALL(*fetcher, fetchData(Seq)).WillOnce(testing::Return(std::nullopt));
-    auto res = extractor.extractLedgerOnly(Seq);
+    EXPECT_CALL(*fetcher, fetchData(kSEQ)).WillOnce(testing::Return(std::nullopt));
+    auto res = extractor.extractLedgerOnly(kSEQ);
     EXPECT_FALSE(res.has_value());
 }
 
 TEST_F(ExtractorTests, ExtractLedgerWithDiffWithResult)
 {
-    auto original = util::CreateDataAndDiff();
+    auto original = util::createDataAndDiff();
 
-    EXPECT_CALL(*fetcher, fetchDataAndDiff(Seq)).WillOnce(testing::Return(original));
-    auto res = extractor.extractLedgerWithDiff(Seq);
+    EXPECT_CALL(*fetcher, fetchDataAndDiff(kSEQ)).WillOnce(testing::Return(original));
+    auto res = extractor.extractLedgerWithDiff(kSEQ);
 
     EXPECT_TRUE(res.has_value());
     EXPECT_EQ(res->objects.size(), 10);
@@ -274,10 +414,10 @@ TEST_F(ExtractorTests, ExtractLedgerWithDiffWithResult)
 
 TEST_F(ExtractorTests, ExtractLedgerOnlyWithResult)
 {
-    auto original = util::CreateData();
+    auto original = util::createData();
 
-    EXPECT_CALL(*fetcher, fetchData(Seq)).WillOnce(testing::Return(original));
-    auto res = extractor.extractLedgerOnly(Seq);
+    EXPECT_CALL(*fetcher, fetchData(kSEQ)).WillOnce(testing::Return(original));
+    auto res = extractor.extractLedgerOnly(kSEQ);
 
     EXPECT_TRUE(res.has_value());
     EXPECT_TRUE(res->objects.empty());

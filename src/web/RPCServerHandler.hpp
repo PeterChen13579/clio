@@ -20,6 +20,7 @@
 #pragma once
 
 #include "data/BackendInterface.hpp"
+#include "etlng/ETLServiceInterface.hpp"
 #include "rpc/Errors.hpp"
 #include "rpc/Factories.hpp"
 #include "rpc/JS.hpp"
@@ -28,8 +29,9 @@
 #include "util/JsonUtils.hpp"
 #include "util/Profiler.hpp"
 #include "util/Taggable.hpp"
+#include "util/config/ConfigDefinition.hpp"
 #include "util/log/Logger.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
+#include "web/dosguard/DOSGuardInterface.hpp"
 #include "web/impl/ErrorHandling.hpp"
 #include "web/interface/ConnectionBase.hpp"
 
@@ -58,13 +60,14 @@ namespace web {
  *
  * Note: see @ref web::SomeServerHandler concept
  */
-template <typename RPCEngineType, typename ETLType>
+template <typename RPCEngineType>
 class RPCServerHandler {
     std::shared_ptr<BackendInterface const> const backend_;
     std::shared_ptr<RPCEngineType> const rpcEngine_;
-    std::shared_ptr<ETLType const> const etl_;
+    std::shared_ptr<etlng::ETLServiceInterface const> const etl_;
     util::TagDecoratorFactory const tagFactory_;
     rpc::impl::ProductionAPIVersionParser apiVersionParser_;  // can be injected if needed
+    std::reference_wrapper<web::dosguard::DOSGuardInterface> dosguard_;
 
     util::Logger log_{"RPC"};
     util::Logger perfLog_{"Performance"};
@@ -77,18 +80,21 @@ public:
      * @param backend The backend to use
      * @param rpcEngine The RPC engine to use
      * @param etl The ETL to use
+     * @param dosguard The DOS guard service to use for request rate limiting
      */
     RPCServerHandler(
         util::config::ClioConfigDefinition const& config,
         std::shared_ptr<BackendInterface const> const& backend,
         std::shared_ptr<RPCEngineType> const& rpcEngine,
-        std::shared_ptr<ETLType const> const& etl
+        std::shared_ptr<etlng::ETLServiceInterface const> const& etl,
+        web::dosguard::DOSGuardInterface& dosguard
     )
         : backend_(backend)
         , rpcEngine_(rpcEngine)
         , etl_(etl)
         , tagFactory_(config)
         , apiVersionParser_(config.getObject("api_version"))
+        , dosguard_(dosguard)
     {
     }
 
@@ -101,12 +107,22 @@ public:
     void
     operator()(std::string const& request, std::shared_ptr<web::ConnectionBase> const& connection)
     {
+        if (not dosguard_.get().isOk(connection->clientIp)) {
+            connection->sendSlowDown(request);
+            return;
+        }
+
         try {
             auto req = boost::json::parse(request).as_object();
             LOG(perfLog_.debug()) << connection->tag() << "Adding to work queue";
 
             if (not connection->upgraded and shouldReplaceParams(req))
                 req[JS(params)] = boost::json::array({boost::json::object{}});
+
+            if (not dosguard_.get().request(connection->clientIp, req)) {
+                connection->sendSlowDown(request);
+                return;
+            }
 
             if (!rpcEngine_->post(
                     [this, request = std::move(req), connection](boost::asio::yield_context yield) mutable {
@@ -158,7 +174,7 @@ private:
 
             auto const context = [&] {
                 if (connection->upgraded) {
-                    return rpc::make_WsContext(
+                    return rpc::makeWsContext(
                         yield,
                         request,
                         connection->makeSubscriptionContext(tagFactory_),
@@ -169,7 +185,7 @@ private:
                         connection->isAdmin()
                     );
                 }
-                return rpc::make_HttpContext(
+                return rpc::makeHttpContext(
                     yield,
                     request,
                     tagFactory_.with(connection->tag()),
@@ -195,14 +211,14 @@ private:
 
             auto [result, timeDiff] = util::timed([&]() { return rpcEngine_->buildResponse(*context); });
 
-            auto us = std::chrono::duration<int, std::milli>(timeDiff);
-            rpc::logDuration(*context, us);
+            auto const us = std::chrono::duration<int, std::milli>(timeDiff);
+            rpc::logDuration(request, context->tag(), us);
 
             boost::json::object response;
 
-            if (auto const status = std::get_if<rpc::Status>(&result.response)) {
+            if (!result.response.has_value()) {
                 // note: error statuses are counted/notified in buildResponse itself
-                response = web::impl::ErrorHelper(connection, request).composeError(*status);
+                response = web::impl::ErrorHelper(connection, request).composeError(result.response.error());
                 auto const responseStr = boost::json::serialize(response);
 
                 LOG(perfLog_.debug()) << context->tag() << "Encountered error: " << responseStr;
@@ -211,7 +227,7 @@ private:
                 // This can still technically be an error. Clio counts forwarded requests as successful.
                 rpcEngine_->notifyComplete(context->method, us);
 
-                auto& json = std::get<boost::json::object>(result.response);
+                auto& json = result.response.value();
                 auto const isForwarded =
                     json.contains("forwarded") && json.at("forwarded").is_bool() && json.at("forwarded").as_bool();
 
@@ -253,10 +269,10 @@ private:
             }
 
             boost::json::array warnings = std::move(result.warnings);
-            warnings.emplace_back(rpc::makeWarning(rpc::warnRPC_CLIO));
+            warnings.emplace_back(rpc::makeWarning(rpc::WarnRpcClio));
 
             if (etl_->lastCloseAgeSeconds() >= 60)
-                warnings.emplace_back(rpc::makeWarning(rpc::warnRPC_OUTDATED));
+                warnings.emplace_back(rpc::makeWarning(rpc::WarnRpcOutdated));
 
             response["warnings"] = warnings;
             connection->send(boost::json::serialize(response));

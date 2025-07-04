@@ -17,6 +17,7 @@
 */
 //==============================================================================
 
+#include "util/MockAssert.hpp"
 #include "util/prometheus/Counter.hpp"
 #include "util/prometheus/OStream.hpp"
 
@@ -30,7 +31,7 @@
 
 using namespace util::prometheus;
 
-struct AnyCounterTests : ::testing::Test {
+struct AnyCounterTests : virtual ::testing::Test {
     struct MockCounterImpl {
         using ValueType = std::uint64_t;
         MOCK_METHOD(void, add, (ValueType));
@@ -40,7 +41,7 @@ struct AnyCounterTests : ::testing::Test {
 
     ::testing::StrictMock<MockCounterImpl> mockCounterImpl;
     std::string const name = "test_counter";
-    std::string labelsString = R"({label1="value1",label2="value2"})";
+    std::string labelsString = R"JSON({label1="value1",label2="value2"})JSON";
     CounterInt counter{name, labelsString, static_cast<MockCounterImpl&>(mockCounterImpl)};
 };
 
@@ -89,18 +90,15 @@ TEST_F(AnyCounterTests, value)
     EXPECT_EQ(counter.value(), 42);
 }
 
-struct AnyCounterDeathTest : AnyCounterTests {};
+struct AnyCounterAssertTest : common::util::WithMockAssert, AnyCounterTests {};
 
-TEST_F(AnyCounterDeathTest, setLowerValue)
+TEST_F(AnyCounterAssertTest, setLowerValue)
 {
     testing::Mock::AllowLeak(&mockCounterImpl);
-    EXPECT_DEATH(
-        {
-            EXPECT_CALL(mockCounterImpl, value()).WillOnce(::testing::Return(50));
-            counter.set(42);
-        },
-        ".*"
-    );
+    EXPECT_CLIO_ASSERT_FAIL({
+        EXPECT_CALL(mockCounterImpl, value()).WillOnce(::testing::Return(50));
+        counter.set(42);
+    });
 }
 
 struct CounterIntTests : ::testing::Test {
@@ -124,22 +122,22 @@ TEST_F(CounterIntTests, reset)
 
 TEST_F(CounterIntTests, multithreadAdd)
 {
-    static auto constexpr numAdditions = 1000;
-    static auto constexpr numNumberAdditions = 100;
-    static auto constexpr numberToAdd = 11;
+    static constexpr auto kNUM_ADDITIONS = 1000;
+    static constexpr auto kNUM_NUMBER_ADDITIONS = 100;
+    static constexpr auto kNUMBER_TO_ADD = 11;
     std::thread thread1([&] {
-        for (int i = 0; i < numAdditions; ++i) {
+        for (int i = 0; i < kNUM_ADDITIONS; ++i) {
             ++counter;
         }
     });
     std::thread thread2([&] {
-        for (int i = 0; i < numNumberAdditions; ++i) {
-            counter += numberToAdd;
+        for (int i = 0; i < kNUM_NUMBER_ADDITIONS; ++i) {
+            counter += kNUMBER_TO_ADD;
         }
     });
     thread1.join();
     thread2.join();
-    EXPECT_EQ(counter.value(), numAdditions + (numNumberAdditions * numberToAdd));
+    EXPECT_EQ(counter.value(), kNUM_ADDITIONS + (kNUM_NUMBER_ADDITIONS * kNUMBER_TO_ADD));
 }
 
 struct CounterDoubleTests : ::testing::Test {
@@ -163,20 +161,20 @@ TEST_F(CounterDoubleTests, reset)
 
 TEST_F(CounterDoubleTests, multithreadAdd)
 {
-    static auto constexpr numAdditions = 1000;
-    static auto constexpr numNumberAdditions = 100;
-    static auto constexpr numberToAdd = 11.1234;
+    static constexpr auto kNUM_ADDITIONS = 1000;
+    static constexpr auto kNUM_NUMBER_ADDITIONS = 100;
+    static constexpr auto kNUMBER_TO_ADD = 11.1234;
     std::thread thread1([&] {
-        for (int i = 0; i < numAdditions; ++i) {
+        for (int i = 0; i < kNUM_ADDITIONS; ++i) {
             ++counter;
         }
     });
     std::thread thread2([&] {
-        for (int i = 0; i < numNumberAdditions; ++i) {
-            counter += numberToAdd;
+        for (int i = 0; i < kNUM_NUMBER_ADDITIONS; ++i) {
+            counter += kNUMBER_TO_ADD;
         }
     });
     thread1.join();
     thread2.join();
-    EXPECT_NEAR(counter.value(), numAdditions + (numNumberAdditions * numberToAdd), 1e-9);
+    EXPECT_NEAR(counter.value(), kNUM_ADDITIONS + (kNUM_NUMBER_ADDITIONS * kNUMBER_TO_ADD), 1e-9);
 }

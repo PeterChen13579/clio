@@ -24,8 +24,10 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <ranges>
 #include <semaphore>
 #include <stdexcept>
 #include <string>
@@ -33,8 +35,6 @@
 
 using namespace util::async;
 using ::testing::Types;
-
-using ExecutionContextTypes = Types<CoroExecutionContext, PoolExecutionContext, SyncExecutionContext>;
 
 template <typename T>
 struct ExecutionContextTests : public ::testing::Test {
@@ -48,7 +48,15 @@ struct ExecutionContextTests : public ::testing::Test {
     }
 };
 
+// Suite for tests to be ran against all context types but SyncExecutionContext
+template <typename T>
+using AsyncExecutionContextTests = ExecutionContextTests<T>;
+
+using ExecutionContextTypes = Types<CoroExecutionContext, PoolExecutionContext, SyncExecutionContext>;
+using AsyncExecutionContextTypes = Types<CoroExecutionContext, PoolExecutionContext>;
+
 TYPED_TEST_CASE(ExecutionContextTests, ExecutionContextTypes);
+TYPED_TEST_CASE(AsyncExecutionContextTests, AsyncExecutionContextTypes);
 
 TYPED_TEST(ExecutionContextTests, move)
 {
@@ -149,6 +157,26 @@ TYPED_TEST(ExecutionContextTests, timerCancel)
     EXPECT_EQ(value, 42);
 }
 
+TYPED_TEST(ExecutionContextTests, timerAutoCancels)
+{
+    auto value = 0;
+    std::binary_semaphore sem{0};
+    {
+        auto res = this->ctx.scheduleAfter(
+            std::chrono::milliseconds(1),
+            [&value, &sem]([[maybe_unused]] auto stopRequested, auto cancelled) {
+                if (cancelled)
+                    value = 42;
+
+                sem.release();
+            }
+        );
+    }  // res goes out of scope and cancels the timer
+
+    sem.acquire();
+    EXPECT_EQ(value, 42);
+}
+
 TYPED_TEST(ExecutionContextTests, timerStdException)
 {
     auto res =
@@ -192,6 +220,24 @@ TYPED_TEST(ExecutionContextTests, repeatingOperation)
 
     EXPECT_GE(callCount, expectedPureCalls / 2u);  // expect at least half of the scheduled calls
     EXPECT_LE(callCount, expectedActualCount);     // never should be called more times than possible before timeout
+}
+
+TYPED_TEST(ExecutionContextTests, repeatingOperationForceInvoke)
+{
+    std::atomic_size_t callCount = 64uz;
+    std::binary_semaphore unblock(0);
+
+    auto res = this->ctx.executeRepeatedly(std::chrono::seconds{10}, [&] {
+        if (--callCount == 0uz)
+            unblock.release();
+    });
+    for ([[maybe_unused]] auto unused : std::views::iota(0uz, callCount.load()))
+        res.invoke();
+
+    unblock.acquire();
+    res.abort();
+
+    EXPECT_EQ(callCount, 0uz);
 }
 
 TYPED_TEST(ExecutionContextTests, strandMove)
@@ -245,6 +291,83 @@ TYPED_TEST(ExecutionContextTests, strandWithTimeout)
     );
 
     EXPECT_EQ(res.get().value(), 42);
+}
+
+TYPED_TEST(ExecutionContextTests, strandedRepeatingOperation)
+{
+    auto strand = this->ctx.makeStrand();
+    auto const repeatDelay = std::chrono::milliseconds{1};
+    auto const timeout = std::chrono::milliseconds{15};
+    auto callCount = 0uz;
+
+    auto res = strand.executeRepeatedly(repeatDelay, [&] { ++callCount; });
+    auto timeSpent = util::timed([timeout] { std::this_thread::sleep_for(timeout); });  // calculate actual time spent
+
+    res.abort();  // outside of the above stopwatch because it blocks and can take arbitrary time
+    auto const expectedPureCalls = timeout.count() / repeatDelay.count();
+    auto const expectedActualCount = timeSpent / repeatDelay.count();
+
+    EXPECT_GE(callCount, expectedPureCalls / 2u);  // expect at least half of the scheduled calls
+    EXPECT_LE(callCount, expectedActualCount);     // never should be called more times than possible before timeout
+}
+
+TYPED_TEST(ExecutionContextTests, strandedRepeatingOperationForceInvoke)
+{
+    auto strand = this->ctx.makeStrand();
+    auto callCount = 64uz;  // does not need to be atomic since we are on a strand
+    std::binary_semaphore unblock(0);
+
+    auto res = strand.executeRepeatedly(std::chrono::seconds{10}, [&] {
+        if (--callCount == 0uz)
+            unblock.release();
+    });
+    for ([[maybe_unused]] auto unused : std::views::iota(0uz, callCount))
+        res.invoke();
+
+    unblock.acquire();
+    res.abort();
+
+    EXPECT_EQ(callCount, 0uz);
+}
+
+TYPED_TEST(AsyncExecutionContextTests, executeAutoAborts)
+{
+    auto value = 0;
+    std::binary_semaphore sem{0};
+
+    {
+        auto res = this->ctx.execute([&](auto stopRequested) {
+            while (not stopRequested)
+                ;
+            value = 42;
+            sem.release();
+        });
+    }  // res goes out of scope and aborts operation
+
+    sem.acquire();
+    EXPECT_EQ(value, 42);
+}
+
+TYPED_TEST(AsyncExecutionContextTests, repeatingOperationAutoAborts)
+{
+    auto const repeatDelay = std::chrono::milliseconds{1};
+    auto const timeout = std::chrono::milliseconds{15};
+    auto callCount = 0uz;
+    auto timeSpentMs = 0u;
+
+    {
+        auto res = this->ctx.executeRepeatedly(repeatDelay, [&] { ++callCount; });
+        timeSpentMs = util::timed([timeout] { std::this_thread::sleep_for(timeout); });  // calculate actual time spent
+    }  // res goes out of scope and automatically aborts the repeating operation
+
+    // double the delay so that if abort did not happen we will fail below expectations
+    std::this_thread::sleep_for(timeout);
+
+    auto const expectedPureCalls = timeout.count() / repeatDelay.count();
+    auto const expectedActualCount = timeSpentMs / repeatDelay.count();
+
+    EXPECT_GE(callCount, expectedPureCalls / 2u);  // expect at least half of the scheduled calls
+    EXPECT_LE(callCount, expectedActualCount);     // never should be called more times than possible before timeout
 }
 
 using NoErrorHandlerSyncExecutionContext = BasicExecutionContext<

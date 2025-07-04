@@ -18,10 +18,11 @@
 //==============================================================================
 
 #include "util/LoggerFixtures.hpp"
+#include "util/MockAssert.hpp"
 #include "util/SignalsHandler.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
-#include "util/newconfig/ConfigValue.hpp"
-#include "util/newconfig/Types.hpp"
+#include "util/config/ConfigDefinition.hpp"
+#include "util/config/ConfigValue.hpp"
+#include "util/config/Types.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -39,10 +40,6 @@ using testing::MockFunction;
 using testing::StrictMock;
 
 struct SignalsHandlerTestsBase : NoLoggerFixture {
-    StrictMock<MockFunction<void()>> forceExitHandler_;
-    StrictMock<MockFunction<void()>> stopHandler_;
-    StrictMock<MockFunction<void()>> anotherStopHandler_;
-
     void
     allowTestToFinish()
     {
@@ -58,12 +55,19 @@ struct SignalsHandlerTestsBase : NoLoggerFixture {
         cv_.wait(lock, [this] { return testCanBeFinished_; });
     }
 
+protected:
+    StrictMock<MockFunction<void()>> forceExitHandler_;
+    StrictMock<MockFunction<void()>> stopHandler_;
+    StrictMock<MockFunction<void()>> anotherStopHandler_;
+
     std::mutex mutex_;
     std::condition_variable cv_;
     bool testCanBeFinished_{false};
 };
 
-TEST(SignalsHandlerDeathTest, CantCreateTwoSignalsHandlers)
+struct SignalsHandlerAssertTest : common::util::WithMockAssert {};
+
+TEST_F(SignalsHandlerAssertTest, CantCreateTwoSignalsHandlers)
 {
     auto makeHandler = []() {
         return SignalsHandler{
@@ -71,10 +75,11 @@ TEST(SignalsHandlerDeathTest, CantCreateTwoSignalsHandlers)
         };
     };
     auto const handler = makeHandler();
-    EXPECT_DEATH({ makeHandler(); }, ".*");
+    EXPECT_CLIO_ASSERT_FAIL({ makeHandler(); });
 }
 
 struct SignalsHandlerTests : SignalsHandlerTestsBase {
+protected:
     SignalsHandler handler_{
         ClioConfigDefinition{{"graceful_period", ConfigValue{ConfigType::Double}.defaultValue(3.0)}},
         forceExitHandler_.AsStdFunction()
@@ -99,6 +104,7 @@ TEST_F(SignalsHandlerTests, OneSignal)
 }
 
 struct SignalsHandlerTimeoutTests : SignalsHandlerTestsBase {
+protected:
     SignalsHandler handler_{
         ClioConfigDefinition{{"graceful_period", ConfigValue{ConfigType::Double}.defaultValue(0.001)}},
         forceExitHandler_.AsStdFunction()

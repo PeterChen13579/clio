@@ -30,6 +30,7 @@
 using namespace util;
 
 struct CoroutineGroupTests : SyncAsioContextTest {
+protected:
     testing::StrictMock<testing::MockFunction<void()>> callback1_;
     testing::StrictMock<testing::MockFunction<void()>> callback2_;
     testing::StrictMock<testing::MockFunction<void()>> callback3_;
@@ -177,12 +178,12 @@ TEST_F(CoroutineGroupTests, SpawnForeign)
     runSpawn([this](boost::asio::yield_context yield) {
         CoroutineGroup group{yield, 1};
 
-        auto const onForeignComplete = group.registerForeign();
+        auto const onForeignComplete = group.registerForeign(yield);
         [&]() { ASSERT_TRUE(onForeignComplete.has_value()); }();
 
-        [&]() { ASSERT_FALSE(group.registerForeign().has_value()); }();
+        [&]() { ASSERT_FALSE(group.registerForeign(yield).has_value()); }();
 
-        boost::asio::spawn(ctx, [this, &onForeignComplete](boost::asio::yield_context innerYield) {
+        boost::asio::spawn(ctx_, [this, &onForeignComplete](boost::asio::yield_context innerYield) {
             boost::asio::steady_timer timer{innerYield.get_executor(), std::chrono::milliseconds{2}};
             timer.async_wait(innerYield);
             callback1_.Call();

@@ -44,8 +44,10 @@
 #include <xrpl/protocol/Indexes.h>
 #include <xrpl/protocol/Issue.h>
 #include <xrpl/protocol/LedgerFormats.h>
+#include <xrpl/protocol/STLedgerEntry.h>
 #include <xrpl/protocol/STObject.h>
 #include <xrpl/protocol/STXChainBridge.h>
+#include <xrpl/protocol/Serializer.h>
 #include <xrpl/protocol/UintTypes.h>
 
 #include <cstdint>
@@ -56,25 +58,30 @@
 #include <vector>
 
 using namespace rpc;
+using namespace data;
 namespace json = boost::json;
 using namespace testing;
 
-constexpr static auto INDEX1 = "05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD";
-constexpr static auto ACCOUNT = "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn";
-constexpr static auto ACCOUNT2 = "rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun";
-constexpr static auto ACCOUNT3 = "rhzcyub9SbyZ4YF1JYskN5rLrTDUuLZG6D";
-constexpr static auto RANGEMIN = 10;
-constexpr static auto RANGEMAX = 30;
-constexpr static auto LEDGERHASH = "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652";
-constexpr static auto TOKENID = "000827103B94ECBB7BF0A0A6ED62B3607801A27B65F4679F4AD1D4850000C0EA";
-constexpr static auto NFTID = "00010000A7CAD27B688D14BA1A9FA5366554D6ADCF9CE0875B974D9F00000004";
-constexpr static auto TXNID = "05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD";
-constexpr static auto CREDENTIALTYPE = "4B5943";
+namespace {
+
+constexpr auto kINDEX1 = "05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD";
+constexpr auto kACCOUNT = "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn";
+constexpr auto kACCOUNT2 = "rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun";
+constexpr auto kACCOUNT3 = "rhzcyub9SbyZ4YF1JYskN5rLrTDUuLZG6D";
+constexpr auto kRANGE_MIN = 10;
+constexpr auto kRANGE_MAX = 30;
+constexpr auto kLEDGER_HASH = "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652";
+constexpr auto kTOKEN_ID = "000827103B94ECBB7BF0A0A6ED62B3607801A27B65F4679F4AD1D4850000C0EA";
+constexpr auto kNFT_ID = "00010000A7CAD27B688D14BA1A9FA5366554D6ADCF9CE0875B974D9F00000004";
+constexpr auto kTXN_ID = "05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD";
+constexpr auto kCREDENTIAL_TYPE = "4B5943";
+
+}  // namespace
 
 struct RPCLedgerEntryTest : HandlerBaseTest {
     RPCLedgerEntryTest()
     {
-        backend->setRange(RANGEMIN, RANGEMAX);
+        backend_->setRange(kRANGE_MIN, kRANGE_MAX);
     }
 };
 
@@ -96,105 +103,105 @@ generateTestValuesForParametersTest()
     return std::vector<ParamTestCaseBundle>{
         ParamTestCaseBundle{
             .testName = "InvalidBinaryType",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "index":
                 "05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD",
                 "binary": "invalid"
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters."
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidAccountRootFormat",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "account_root": "invalid"
-            })",
+            })JSON",
             .expectedError = "malformedAddress",
             .expectedErrorMessage = "Malformed address."
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidDidFormat",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "did": "invalid"
-            })",
+            })JSON",
             .expectedError = "malformedAddress",
             .expectedErrorMessage = "Malformed address."
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidAccountRootNotString",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "account_root": 123
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "account_rootNotString"
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidLedgerIndex",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "ledger_index": "wrong"
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "ledgerIndexMalformed"
         },
 
         ParamTestCaseBundle{
             .testName = "UnknownOption",
-            .testJson = R"({})",
+            .testJson = R"JSON({})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters."
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidDepositPreauthType",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "deposit_preauth": 123
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters."
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidDepositPreauthString",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "deposit_preauth": "invalid"
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
 
         ParamTestCaseBundle{
-            .testName = "InvalidDepositPreauthEmtpyJson",
-            .testJson = R"({
+            .testName = "InvalidDepositPreauthEmptyJson",
+            .testJson = R"JSON({
                 "deposit_preauth": {}
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Required field 'owner' missing"
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidDepositPreauthJsonWrongAccount",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "deposit_preauth": {
                     "owner": "invalid",
                     "authorized": "invalid"
                 }
-            })",
+            })JSON",
             .expectedError = "malformedOwner",
             .expectedErrorMessage = "Malformed owner."
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidDepositPreauthJsonOwnerNotString",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "deposit_preauth": {
                     "owner": 123,
                     "authorized": 123
                 }
-            })",
+            })JSON",
             .expectedError = "malformedOwner",
             .expectedErrorMessage = "Malformed owner."
         },
@@ -202,13 +209,13 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "InvalidDepositPreauthJsonAuthorizedNotString",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "deposit_preauth": {{
                         "owner": "{}",
                         "authorized": 123
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "invalidParams",
             .expectedErrorMessage = "authorizedNotString"
@@ -217,13 +224,13 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "InvalidDepositPreauthJsonAuthorizeCredentialsNotArray",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "deposit_preauth": {{
                         "owner": "{}",
                         "authorized_credentials": "asdf"
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "authorized_credentials not array"
@@ -232,13 +239,13 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "InvalidDepositPreauthJsonAuthorizeCredentialsMalformedString",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "deposit_preauth": {{
                         "owner": "{}",
                         "authorized_credentials": ["C2F2A19C8D0D893D18F18FDCFE13A3ECB41767E48422DF07F2455CDA08FDF09B"]
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedAuthorizedCredentials",
             .expectedErrorMessage = "authorized_credentials elements in array are not objects."
@@ -247,12 +254,12 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "DepositPreauthBothAuthAndAuthCredentialsDoesNotExists",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "deposit_preauth": {{
                         "owner": "{}"
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Must have one of authorized or authorized_credentials."
@@ -261,7 +268,7 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "DepositPreauthBothAuthAndAuthCredentialsExists",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "deposit_preauth": {{
                         "owner": "{}",
                         "authorized": "{}",
@@ -272,11 +279,11 @@ generateTestValuesForParametersTest()
                             }}
                         ]
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT2,
-                ACCOUNT3,
-                CREDENTIALTYPE
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT2,
+                kACCOUNT3,
+                kCREDENTIAL_TYPE
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Must have one of authorized or authorized_credentials."
@@ -285,14 +292,14 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "DepositPreauthEmptyAuthorizeCredentials",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "deposit_preauth": {{
                         "owner": "{}",
                         "authorized_credentials": [
                         ]
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedAuthorizedCredentials",
             .expectedErrorMessage = "Requires at least one element in authorized_credentials array."
@@ -301,7 +308,7 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "DepositPreauthAuthorizeCredentialsMissingCredentialType",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "deposit_preauth": {{
                         "owner": "{}",
                         "authorized_credentials": [
@@ -310,9 +317,9 @@ generateTestValuesForParametersTest()
                             }}
                         ]
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT2
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT2
             ),
             .expectedError = "malformedAuthorizedCredentials",
             .expectedErrorMessage = "Field 'CredentialType' is required but missing."
@@ -321,7 +328,7 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "DepositPreauthAuthorizeCredentialsMissingIssuer",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "deposit_preauth": {{
                         "owner": "{}",
                         "authorized_credentials": [
@@ -330,9 +337,9 @@ generateTestValuesForParametersTest()
                         }}
                         ]
                     }}
-                }})",
-                ACCOUNT,
-                CREDENTIALTYPE
+                }})JSON",
+                kACCOUNT,
+                kCREDENTIAL_TYPE
             ),
             .expectedError = "malformedAuthorizedCredentials",
             .expectedErrorMessage = "Field 'Issuer' is required but missing."
@@ -341,7 +348,7 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "DepositPreauthAuthorizeCredentialsIncorrectIssuerType",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "deposit_preauth": {{
                         "owner": "{}",
                         "authorized_credentials": [
@@ -351,9 +358,9 @@ generateTestValuesForParametersTest()
                         }}
                         ]
                     }}
-                }})",
-                ACCOUNT,
-                CREDENTIALTYPE
+                }})JSON",
+                kACCOUNT,
+                kCREDENTIAL_TYPE
             ),
             .expectedError = "malformedAuthorizedCredentials",
             .expectedErrorMessage = "issuer NotString"
@@ -362,7 +369,7 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "DepositPreauthAuthorizeCredentialsIncorrectCredentialType",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "deposit_preauth": {{
                         "owner": "{}",
                         "authorized_credentials": [
@@ -372,9 +379,9 @@ generateTestValuesForParametersTest()
                         }}
                         ]
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT2
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT2
             ),
             .expectedError = "malformedAuthorizedCredentials",
             .expectedErrorMessage = "credential_type NotString"
@@ -383,7 +390,7 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "DepositPreauthAuthorizeCredentialsCredentialTypeNotHex",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "deposit_preauth": {{
                         "owner": "{}",
                         "authorized_credentials": [
@@ -393,9 +400,9 @@ generateTestValuesForParametersTest()
                         }}
                         ]
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT2
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT2
             ),
             .expectedError = "malformedAuthorizedCredentials",
             .expectedErrorMessage = "credential_type NotHexString"
@@ -404,7 +411,7 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "DepositPreauthAuthorizeCredentialsCredentialTypeEmpty",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "deposit_preauth": {{
                         "owner": "{}",
                         "authorized_credentials": [
@@ -414,9 +421,9 @@ generateTestValuesForParametersTest()
                         }}
                         ]
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT2
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT2
             ),
             .expectedError = "malformedAuthorizedCredentials",
             .expectedErrorMessage = "credential_type is empty"
@@ -425,7 +432,7 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "DepositPreauthDuplicateAuthorizeCredentials",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "deposit_preauth": {{
                         "owner": "{}",
                         "authorized_credentials": [
@@ -439,12 +446,12 @@ generateTestValuesForParametersTest()
                         }}
                         ]
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT2,
-                CREDENTIALTYPE,
-                ACCOUNT2,
-                CREDENTIALTYPE
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT2,
+                kCREDENTIAL_TYPE,
+                kACCOUNT2,
+                kCREDENTIAL_TYPE
             ),
             .expectedError = "malformedAuthorizedCredentials",
             .expectedErrorMessage = "duplicates in credentials."
@@ -452,51 +459,51 @@ generateTestValuesForParametersTest()
 
         ParamTestCaseBundle{
             .testName = "InvalidTicketType",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "ticket": 123
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters."
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidTicketIndex",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "ticket": "invalid"
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidTicketEmptyJson",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "ticket": {}
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Required field 'account' missing"
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidTicketJsonAccountNotString",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "ticket": {
                     "account": 123,
                     "ticket_seq": 123
                 }
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "accountNotString"
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidTicketJsonAccountInvalid",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "ticket": {
                     "account": "123",
                     "ticket_seq": 123
                 }
-            })",
+            })JSON",
             .expectedError = "malformedAddress",
             .expectedErrorMessage = "Malformed address."
         },
@@ -504,13 +511,13 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "InvalidTicketJsonSeqNotInt",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "ticket": {{
                         "account": "{}",
                         "ticket_seq": "123"
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -518,51 +525,51 @@ generateTestValuesForParametersTest()
 
         ParamTestCaseBundle{
             .testName = "InvalidOfferType",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "offer": 123
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters."
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidOfferIndex",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "offer": "invalid"
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidOfferEmptyJson",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "offer": {}
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Required field 'account' missing"
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidOfferJsonAccountNotString",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "ticket": {
                     "account": 123,
                     "seq": 123
                 }
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "accountNotString"
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidOfferJsonAccountInvalid",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "ticket": {
                     "account": "123",
                     "seq": 123
                 }
-            })",
+            })JSON",
             .expectedError = "malformedAddress",
             .expectedErrorMessage = "Malformed address."
         },
@@ -570,13 +577,13 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "InvalidOfferJsonSeqNotInt",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "offer": {{
                         "account": "{}",
                         "seq": "123"
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -584,51 +591,51 @@ generateTestValuesForParametersTest()
 
         ParamTestCaseBundle{
             .testName = "InvalidEscrowType",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "escrow": 123
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters."
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidEscrowIndex",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "escrow": "invalid"
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidEscrowEmptyJson",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "escrow": {}
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Required field 'owner' missing"
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidEscrowJsonAccountNotString",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "escrow": {
                     "owner": 123,
                     "seq": 123
                 }
-            })",
+            })JSON",
             .expectedError = "malformedOwner",
             .expectedErrorMessage = "Malformed owner."
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidEscrowJsonAccountInvalid",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "escrow": {
                     "owner": "123",
                     "seq": 123
                 }
-            })",
+            })JSON",
             .expectedError = "malformedOwner",
             .expectedErrorMessage = "Malformed owner."
         },
@@ -636,13 +643,13 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "InvalidEscrowJsonSeqNotInt",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "escrow": {{
                         "owner": "{}",
                         "seq": "123"
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -650,29 +657,29 @@ generateTestValuesForParametersTest()
 
         ParamTestCaseBundle{
             .testName = "InvalidRippleStateType",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "ripple_state": "123"
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters."
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidRippleStateMissField",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "ripple_state": {
                     "currency": "USD"
                 }
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Required field 'accounts' missing"
         },
 
         ParamTestCaseBundle{
-            .testName = "InvalidRippleStateEmtpyJson",
-            .testJson = R"({
+            .testName = "InvalidRippleStateEmptyJson",
+            .testJson = R"JSON({
                 "ripple_state": {}
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Required field 'accounts' missing"
         },
@@ -680,12 +687,12 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "InvalidRippleStateOneAccount",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "ripple_state": {{
-                        "accounts" : ["{}"]
+                        "accounts": ["{}"]
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "invalidParams",
             .expectedErrorMessage = "malformedAccounts"
@@ -694,14 +701,14 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "InvalidRippleStateSameAccounts",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "ripple_state": {{
-                        "accounts" : ["{}","{}"],
+                        "accounts": ["{}", "{}"],
                         "currency": "USD"
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT
             ),
             .expectedError = "invalidParams",
             .expectedErrorMessage = "malformedAccounts"
@@ -710,13 +717,13 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "InvalidRippleStateWrongAccountsNotString",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "ripple_state": {{
-                        "accounts" : ["{}",123],
+                        "accounts": ["{}",123],
                         "currency": "USD"
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "invalidParams",
             .expectedErrorMessage = "malformedAccounts"
@@ -725,13 +732,13 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "InvalidRippleStateWrongAccountsFormat",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "ripple_state": {{
-                        "accounts" : ["{}","123"],
+                        "accounts": ["{}", "123"],
                         "currency": "USD"
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedAddress",
             .expectedErrorMessage = "malformedAddresses"
@@ -740,14 +747,14 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "InvalidRippleStateWrongCurrency",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "ripple_state": {{
-                        "accounts" : ["{}","{}"],
+                        "accounts": ["{}", "{}"],
                         "currency": "XXXX"
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT2
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT2
             ),
             .expectedError = "malformedCurrency",
             .expectedErrorMessage = "malformedCurrency"
@@ -756,14 +763,14 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "InvalidRippleStateWrongCurrencyNotString",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "ripple_state": {{
-                        "accounts" : ["{}","{}"],
+                        "accounts": ["{}", "{}"],
                         "currency": 123
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT2
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT2
             ),
             .expectedError = "invalidParams",
             .expectedErrorMessage = "currencyNotString"
@@ -771,71 +778,71 @@ generateTestValuesForParametersTest()
 
         ParamTestCaseBundle{
             .testName = "InvalidDirectoryType",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "directory": 123
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters."
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidDirectoryIndex",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "directory": "123"
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
 
         ParamTestCaseBundle{
-            .testName = "InvalidDirectoryEmtpyJson",
-            .testJson = R"({
+            .testName = "InvalidDirectoryEmptyJson",
+            .testJson = R"JSON({
                 "directory": {}
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "missingOwnerOrDirRoot"
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidDirectoryWrongOwnerNotString",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "directory": {
                     "owner": 123
                 }
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "ownerNotString"
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidDirectoryWrongOwnerFormat",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "directory": {
                     "owner": "123"
                 }
-            })",
+            })JSON",
             .expectedError = "malformedAddress",
             .expectedErrorMessage = "Malformed address."
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidDirectoryWrongDirFormat",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "directory": {
                     "dir_root": "123"
                 }
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "dir_rootMalformed"
         },
 
         ParamTestCaseBundle{
             .testName = "InvalidDirectoryWrongDirNotString",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "directory": {
                     "dir_root": 123
                 }
-            })",
+            })JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "dir_rootNotString"
         },
@@ -843,14 +850,14 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "InvalidDirectoryDirOwnerConflict",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "directory": {{
                         "dir_root": "{}",
                         "owner": "{}"
                     }}
-                }})",
-                INDEX1,
-                ACCOUNT
+                }})JSON",
+                kINDEX1,
+                kACCOUNT
             ),
             .expectedError = "invalidParams",
             .expectedErrorMessage = "mayNotSpecifyBothDirRootAndOwner"
@@ -859,13 +866,13 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "InvalidDirectoryDirSubIndexNotInt",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "directory": {{
                         "dir_root": "{}",
                         "sub_index": "not int"
                     }}
-                }})",
-                INDEX1
+                }})JSON",
+                kINDEX1
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -873,30 +880,30 @@ generateTestValuesForParametersTest()
 
         ParamTestCaseBundle{
             .testName = "InvalidAMMStringIndex",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "amm": "invalid"
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
 
         ParamTestCaseBundle{
             .testName = "EmptyAMMJson",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "amm": {}
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
 
         ParamTestCaseBundle{
             .testName = "NonObjectAMMJsonAsset",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "amm": {
                     "asset": 123,
                     "asset2": 123
                 }
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
@@ -904,18 +911,18 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "EmptyAMMAssetJson",
             .testJson = fmt::format(
-                R"({{
-                    "amm": 
+                R"JSON({{
+                    "amm":
                     {{
-                        "asset":{{}},
+                        "asset": {{}},
                         "asset2":
                         {{
-                            "currency" : "USD",
-                            "issuer" : "{}"
+                            "currency": "USD",
+                            "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -924,18 +931,18 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "EmptyAMMAsset2Json",
             .testJson = fmt::format(
-                R"({{
-                    "amm": 
+                R"JSON({{
+                    "amm":
                     {{
-                        "asset2":{{}},
+                        "asset2": {{}},
                         "asset":
                         {{
-                            "currency" : "USD",
-                            "issuer" : "{}"
+                            "currency": "USD",
+                            "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -944,17 +951,17 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "MissingAMMAsset2Json",
             .testJson = fmt::format(
-                R"({{
-                    "amm": 
+                R"JSON({{
+                    "amm":
                     {{
                         "asset":
                         {{
-                            "currency" : "USD",
-                            "issuer" : "{}"
+                            "currency": "USD",
+                            "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -963,17 +970,17 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "MissingAMMAssetJson",
             .testJson = fmt::format(
-                R"({{
-                    "amm": 
+                R"JSON({{
+                    "amm":
                     {{
                         "asset2":
                         {{
-                            "currency" : "USD",
-                            "issuer" : "{}"
+                            "currency": "USD",
+                            "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -982,18 +989,18 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "AMMAssetNotJson",
             .testJson = fmt::format(
-                R"({{
-                    "amm": 
+                R"JSON({{
+                    "amm":
                     {{
                         "asset": "invalid",
                         "asset2":
                         {{
-                            "currency" : "USD",
-                            "issuer" : "{}"
+                            "currency": "USD",
+                            "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1002,18 +1009,18 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "AMMAsset2NotJson",
             .testJson = fmt::format(
-                R"({{
-                    "amm": 
+                R"JSON({{
+                    "amm":
                     {{
                         "asset2": "invalid",
                         "asset":
                         {{
-                            "currency" : "USD",
-                            "issuer" : "{}"
+                            "currency": "USD",
+                            "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1022,21 +1029,21 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "WrongAMMAssetCurrency",
             .testJson = fmt::format(
-                R"({{
-                    "amm": 
+                R"JSON({{
+                    "amm":
                     {{
                         "asset2":
                         {{
-                            "currency":"XRP"
+                            "currency": "XRP"
                         }},
                         "asset":
                         {{
-                            "currency" : "USD2",
-                            "issuer" : "{}"
+                            "currency": "USD2",
+                            "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1045,21 +1052,21 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "WrongAMMAssetIssuer",
             .testJson = fmt::format(
-                R"({{
-                    "amm": 
+                R"JSON({{
+                    "amm":
                     {{
                         "asset2":
                         {{
-                            "currency":"XRP"
+                            "currency": "XRP"
                         }},
                         "asset":
                         {{
-                            "currency" : "USD",
-                            "issuer" : "aa{}"
+                            "currency": "USD",
+                            "issuer": "aa{}"
                         }}
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1068,21 +1075,21 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "MissingAMMAssetIssuerForNonXRP",
             .testJson = fmt::format(
-                R"({{
-                    "amm": 
+                R"JSON({{
+                    "amm":
                     {{
                         "asset2":
                         {{
-                            "currency":"JPY"
+                            "currency": "JPY"
                         }},
                         "asset":
                         {{
-                            "currency" : "USD",
-                            "issuer" : "{}"
+                            "currency": "USD",
+                            "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1091,23 +1098,23 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "AMMAssetHasIssuerForXRP",
             .testJson = fmt::format(
-                R"({{
-                    "amm": 
+                R"JSON({{
+                    "amm":
                     {{
                         "asset2":
                         {{
-                            "currency":"XRP",
-                            "issuer":"{}"
+                            "currency": "XRP",
+                            "issuer": "{}"
                         }},
                         "asset":
                         {{
-                            "currency" : "USD",
-                            "issuer" : "{}"
+                            "currency": "USD",
+                            "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1116,20 +1123,20 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "MissingAMMAssetCurrency",
             .testJson = fmt::format(
-                R"({{
-                    "amm": 
+                R"JSON({{
+                    "amm":
                     {{
                         "asset2":
                         {{
-                            "currency":"XRP"
+                            "currency": "XRP"
                         }},
                         "asset":
                         {{
-                            "issuer" : "{}"
+                            "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1137,8 +1144,8 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "BridgeMissingBridgeAccount",
             .testJson = fmt::format(
-                R"({{
-                    "bridge": 
+                R"JSON({{
+                    "bridge":
                     {{
                         "LockingChainDoor": "{}",
                         "IssuingChainDoor": "{}",
@@ -1152,11 +1159,11 @@ generateTestValuesForParametersTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
                 "JPY",
-                ACCOUNT2
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1164,9 +1171,9 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "BridgeCurrencyIsNumber",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "bridge_account": "{}",
-                    "bridge": 
+                    "bridge":
                     {{
                         "LockingChainDoor": "{}",
                         "IssuingChainDoor": "{}",
@@ -1180,12 +1187,12 @@ generateTestValuesForParametersTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
-                ACCOUNT,
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
+                kACCOUNT,
                 1,
-                ACCOUNT2
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1193,9 +1200,9 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "BridgeIssuerIsNumber",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "bridge_account": "{}",
-                    "bridge": 
+                    "bridge":
                     {{
                         "LockingChainDoor": "{}",
                         "IssuingChainDoor": "{}",
@@ -1209,10 +1216,10 @@ generateTestValuesForParametersTest()
                             "issuer": {}
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
-                ACCOUNT,
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
+                kACCOUNT,
                 "JPY",
                 2
             ),
@@ -1222,9 +1229,9 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "BridgeIssuingChainIssueIsNotObject",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "bridge_account": "{}",
-                    "bridge": 
+                    "bridge":
                     {{
                         "LockingChainDoor": "{}",
                         "IssuingChainDoor": "{}",
@@ -1234,10 +1241,10 @@ generateTestValuesForParametersTest()
                         }},
                         "IssuingChainIssue": 1
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
-                ACCOUNT
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1245,9 +1252,9 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "BridgeWithInvalidBridgeAccount",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "bridge_account": "abcd",
-                    "bridge": 
+                    "bridge":
                     {{
                         "LockingChainDoor": "{}",
                         "IssuingChainDoor": "{}",
@@ -1261,11 +1268,11 @@ generateTestValuesForParametersTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
                 "JPY",
-                ACCOUNT2
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1273,9 +1280,9 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "BridgeDoorInvalid",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "bridge_account": "{}",
-                    "bridge": 
+                    "bridge":
                     {{
                         "LockingChainDoor": "{}",
                         "IssuingChainDoor": "abcd",
@@ -1289,11 +1296,11 @@ generateTestValuesForParametersTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
                 "JPY",
-                ACCOUNT2
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1301,9 +1308,9 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "BridgeIssuerInvalid",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "bridge_account": "{}",
-                    "bridge": 
+                    "bridge":
                     {{
                         "LockingChainDoor": "{}",
                         "IssuingChainDoor": "{}",
@@ -1317,10 +1324,10 @@ generateTestValuesForParametersTest()
                             "issuer": "invalid"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
-                ACCOUNT,
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
+                kACCOUNT,
                 "JPY"
             ),
             .expectedError = "malformedRequest",
@@ -1329,9 +1336,9 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "BridgeIssueCurrencyInvalid",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "bridge_account": "{}",
-                    "bridge": 
+                    "bridge":
                     {{
                         "LockingChainDoor": "{}",
                         "IssuingChainDoor": "{}",
@@ -1345,11 +1352,11 @@ generateTestValuesForParametersTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
-                ACCOUNT2,
-                ACCOUNT2
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
+                kACCOUNT2,
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1357,9 +1364,9 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "BridgeIssueXRPCurrencyInvalid",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "bridge_account": "{}",
-                    "bridge": 
+                    "bridge":
                     {{
                         "LockingChainDoor": "{}",
                         "IssuingChainDoor": "{}",
@@ -1374,12 +1381,12 @@ generateTestValuesForParametersTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
-                ACCOUNT2,
-                ACCOUNT2,
-                ACCOUNT2
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
+                kACCOUNT2,
+                kACCOUNT2,
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1387,9 +1394,9 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "BridgeIssueJPYCurrencyInvalid",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "bridge_account": "{}",
-                    "bridge": 
+                    "bridge":
                     {{
                         "LockingChainDoor": "{}",
                         "IssuingChainDoor": "{}",
@@ -1402,10 +1409,10 @@ generateTestValuesForParametersTest()
                             "currency": "JPY"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
-                ACCOUNT2
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1413,9 +1420,9 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "BridgeMissingLockingChainDoor",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "bridge_account": "{}",
-                    "bridge": 
+                    "bridge":
                     {{
                         "IssuingChainDoor": "{}",
                         "LockingChainIssue":
@@ -1429,11 +1436,11 @@ generateTestValuesForParametersTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT2,
-                ACCOUNT2,
-                ACCOUNT2
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT2,
+                kACCOUNT2,
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1441,9 +1448,9 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "BridgeMissingIssuingChainDoor",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "bridge_account": "{}",
-                    "bridge": 
+                    "bridge":
                     {{
                         "LockingChainDoor": "{}",
                         "LockingChainIssue":
@@ -1456,10 +1463,10 @@ generateTestValuesForParametersTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
-                ACCOUNT2
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1467,9 +1474,9 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "BridgeMissingLockingChainIssue",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "bridge_account": "{}",
-                    "bridge": 
+                    "bridge":
                     {{
                         "IssuingChainDoor": "{}",
                         "LockingChainDoor": "{}",
@@ -1479,11 +1486,11 @@ generateTestValuesForParametersTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
-                ACCOUNT,
-                ACCOUNT2
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
+                kACCOUNT,
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1491,9 +1498,9 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "BridgeMissingIssuingChainIssue",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "bridge_account": "{}",
-                    "bridge": 
+                    "bridge":
                     {{
                         "IssuingChainDoor": "{}",
                         "LockingChainDoor": "{}",
@@ -1503,11 +1510,11 @@ generateTestValuesForParametersTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
-                ACCOUNT,
-                ACCOUNT2
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
+                kACCOUNT,
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1515,28 +1522,28 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "BridgeInvalidType",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "bridge_account": "{}",
                     "bridge": "invalid"
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
         ParamTestCaseBundle{
             .testName = "OwnedClaimIdInvalidType",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "xchain_owned_claim_id": 123
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
         ParamTestCaseBundle{
             .testName = "OwnedClaimIdJsonMissingClaimId",
             .testJson = fmt::format(
-                R"({{
-                    "xchain_owned_claim_id": 
+                R"JSON({{
+                    "xchain_owned_claim_id":
                     {{
                         "LockingChainDoor": "{}",
                         "IssuingChainDoor": "{}",
@@ -1550,11 +1557,11 @@ generateTestValuesForParametersTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
                 "JPY",
-                ACCOUNT2
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1562,8 +1569,8 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "OwnedClaimIdJsonMissingDoor",
             .testJson = fmt::format(
-                R"({{
-                    "xchain_owned_claim_id": 
+                R"JSON({{
+                    "xchain_owned_claim_id":
                     {{
                         "xchain_owned_claim_id": 10,
                         "LockingChainDoor": "{}",
@@ -1577,10 +1584,10 @@ generateTestValuesForParametersTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
+                }})JSON",
+                kACCOUNT,
                 "JPY",
-                ACCOUNT2
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1588,8 +1595,8 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "OwnedClaimIdJsonMissingIssue",
             .testJson = fmt::format(
-                R"({{
-                    "xchain_owned_claim_id": 
+                R"JSON({{
+                    "xchain_owned_claim_id":
                     {{
                         "xchain_owned_claim_id": 10,
                         "LockingChainDoor": "{}",
@@ -1599,9 +1606,9 @@ generateTestValuesForParametersTest()
                             "currency": "XRP"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT
             ),
 
             .expectedError = "malformedRequest",
@@ -1610,8 +1617,8 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "OwnedClaimIdJsonInvalidDoor",
             .testJson = fmt::format(
-                R"({{
-                    "xchain_owned_claim_id": 
+                R"JSON({{
+                    "xchain_owned_claim_id":
                     {{
                         "xchain_owned_claim_id": 10,
                         "LockingChainDoor": "abcd",
@@ -1626,10 +1633,10 @@ generateTestValuesForParametersTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
+                }})JSON",
+                kACCOUNT,
                 "JPY",
-                ACCOUNT2
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1637,8 +1644,8 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "OwnedClaimIdJsonInvalidIssue",
             .testJson = fmt::format(
-                R"({{
-                    "xchain_owned_claim_id": 
+                R"JSON({{
+                    "xchain_owned_claim_id":
                     {{
                         "xchain_owned_claim_id": 10,
                         "LockingChainDoor": "{}",
@@ -1652,9 +1659,9 @@ generateTestValuesForParametersTest()
                             "currency": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
                 "JPY"
             ),
             .expectedError = "malformedRequest",
@@ -1662,17 +1669,17 @@ generateTestValuesForParametersTest()
         },
         ParamTestCaseBundle{
             .testName = "OwnedCreateAccountClaimIdInvalidType",
-            .testJson = R"({
+            .testJson = R"JSON({
                     "xchain_owned_create_account_claim_id": 123
-                    })",
+                    })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
         ParamTestCaseBundle{
             .testName = "OwnedCreateAccountClaimIdJsonMissingClaimId",
             .testJson = fmt::format(
-                R"({{
-                    "xchain_owned_create_account_claim_id": 
+                R"JSON({{
+                    "xchain_owned_create_account_claim_id":
                     {{
                         "LockingChainDoor": "{}",
                         "IssuingChainDoor": "{}",
@@ -1686,11 +1693,11 @@ generateTestValuesForParametersTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
                 "JPY",
-                ACCOUNT2
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1698,8 +1705,8 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "OwnedCreateAccountClaimIdJsonMissingDoor",
             .testJson = fmt::format(
-                R"({{
-                    "xchain_owned_create_account_claim_id": 
+                R"JSON({{
+                    "xchain_owned_create_account_claim_id":
                     {{
                         "xchain_owned_create_account_claim_id": 10,
                         "LockingChainDoor": "{}",
@@ -1713,10 +1720,10 @@ generateTestValuesForParametersTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
+                }})JSON",
+                kACCOUNT,
                 "JPY",
-                ACCOUNT2
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1724,8 +1731,8 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "OwnedCreateAccountClaimIdJsonMissingIssue",
             .testJson = fmt::format(
-                R"({{
-                    "xchain_owned_create_account_claim_id": 
+                R"JSON({{
+                    "xchain_owned_create_account_claim_id":
                     {{
                         "xchain_owned_create_account_claim_id": 10,
                         "LockingChainDoor": "{}",
@@ -1735,9 +1742,9 @@ generateTestValuesForParametersTest()
                             "currency": "XRP"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT
             ),
 
             .expectedError = "malformedRequest",
@@ -1746,8 +1753,8 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "OwnedCreateAccountClaimIdJsonInvalidDoor",
             .testJson = fmt::format(
-                R"({{
-                    "xchain_owned_create_account_claim_id": 
+                R"JSON({{
+                    "xchain_owned_create_account_claim_id":
                     {{
                         "xchain_owned_create_account_claim_id": 10,
                         "LockingChainDoor": "abcd",
@@ -1762,10 +1769,10 @@ generateTestValuesForParametersTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
+                }})JSON",
+                kACCOUNT,
                 "JPY",
-                ACCOUNT2
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1773,8 +1780,8 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "OwnedCreateAccountClaimIdJsonInvalidIssue",
             .testJson = fmt::format(
-                R"({{
-                    "xchain_owned_create_account_claim_id": 
+                R"JSON({{
+                    "xchain_owned_create_account_claim_id":
                     {{
                         "xchain_owned_create_account_claim_id": 10,
                         "LockingChainDoor": "{}",
@@ -1788,9 +1795,9 @@ generateTestValuesForParametersTest()
                             "currency": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
                 "JPY"
             ),
             .expectedError = "malformedRequest",
@@ -1799,12 +1806,12 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "OracleObjectDocumentIdMissing",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "oracle": {{
                         "account": "{}"
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -1812,13 +1819,13 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "OracleObjectDocumentIdInvalidNegative",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "oracle": {{
                         "account": "{}",
                         "oracle_document_id": -1
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedDocumentID",
             .expectedErrorMessage = "Malformed oracle_document_id."
@@ -1826,13 +1833,13 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "OracleObjectDocumentIdInvalidTypeString",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "oracle": {{
                         "account": "{}",
                         "oracle_document_id": "invalid"
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedDocumentID",
             .expectedErrorMessage = "Malformed oracle_document_id."
@@ -1840,13 +1847,13 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "OracleObjectDocumentIdInvalidTypeDouble",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "oracle": {{
                         "account": "{}",
                         "oracle_document_id": 3.21
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedDocumentID",
             .expectedErrorMessage = "Malformed oracle_document_id."
@@ -1854,13 +1861,13 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "OracleObjectDocumentIdInvalidTypeObject",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "oracle": {{
                         "account": "{}",
                         "oracle_document_id": {{}}
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedDocumentID",
             .expectedErrorMessage = "Malformed oracle_document_id."
@@ -1868,13 +1875,13 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "OracleObjectDocumentIdInvalidTypeArray",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "oracle": {{
                         "account": "{}",
                         "oracle_document_id": []
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedDocumentID",
             .expectedErrorMessage = "Malformed oracle_document_id."
@@ -1882,186 +1889,186 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "OracleObjectDocumentIdInvalidTypeNull",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "oracle": {{
                         "account": "{}",
                         "oracle_document_id": null
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedDocumentID",
             .expectedErrorMessage = "Malformed oracle_document_id."
         },
         ParamTestCaseBundle{
             .testName = "OracleObjectAccountMissing",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "oracle": {
                     "oracle_document_id": 1
                 }
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
         ParamTestCaseBundle{
             .testName = "OracleObjectAccountInvalidTypeInteger",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "oracle": {
                     "account": 123,
                     "oracle_document_id": 1
                 }
-            })",
+            })JSON",
             .expectedError = "malformedAddress",
             .expectedErrorMessage = "Malformed address."
         },
         ParamTestCaseBundle{
             .testName = "OracleObjectAccountInvalidTypeDouble",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "oracle": {
                     "account": 123.45,
                     "oracle_document_id": 1
                 }
-            })",
+            })JSON",
             .expectedError = "malformedAddress",
             .expectedErrorMessage = "Malformed address."
         },
         ParamTestCaseBundle{
             .testName = "OracleObjectAccountInvalidTypeNull",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "oracle": {
                     "account": null,
                     "oracle_document_id": 1
                 }
-            })",
+            })JSON",
             .expectedError = "malformedAddress",
             .expectedErrorMessage = "Malformed address."
         },
         ParamTestCaseBundle{
             .testName = "OracleObjectAccountInvalidTypeObject",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "oracle": {
                     "account": {"test": "test"},
                     "oracle_document_id": 1
                 }
-            })",
+            })JSON",
             .expectedError = "malformedAddress",
             .expectedErrorMessage = "Malformed address."
         },
         ParamTestCaseBundle{
             .testName = "OracleObjectAccountInvalidTypeArray",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "oracle": {
                     "account": [{"test": "test"}],
                     "oracle_document_id": 1
                 }
-            })",
+            })JSON",
             .expectedError = "malformedAddress",
             .expectedErrorMessage = "Malformed address."
         },
         ParamTestCaseBundle{
             .testName = "OracleObjectAccountInvalidFormat",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "oracle": {
                     "account": "NotHex",
                     "oracle_document_id": 1
                 }
-            })",
+            })JSON",
             .expectedError = "malformedAddress",
             .expectedErrorMessage = "Malformed address."
         },
         ParamTestCaseBundle{
             .testName = "OracleStringInvalidFormat",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "oracle": "NotHex"
-            })",
+            })JSON",
             .expectedError = "malformedAddress",
             .expectedErrorMessage = "Malformed address."
         },
         ParamTestCaseBundle{
             .testName = "OracleStringInvalidTypeInteger",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "oracle": 123
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
         ParamTestCaseBundle{
             .testName = "OracleStringInvalidTypeDouble",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "oracle": 123.45
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
         ParamTestCaseBundle{
             .testName = "OracleStringInvalidTypeArray",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "oracle": [{"test": "test"}]
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
         ParamTestCaseBundle{
             .testName = "OracleStringInvalidTypeNull",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "oracle": null
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
         ParamTestCaseBundle{
             .testName = "CredentialInvalidSubjectType",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "credential": {
                     "subject": 123
                 }
-            })",
+            })JSON",
             .expectedError = "malformedAddress",
             .expectedErrorMessage = "Malformed address."
         },
         ParamTestCaseBundle{
             .testName = "CredentialInvalidIssuerType",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                 "credential": {{
                     "issuer": ["{}"]
                 }}
-            }})",
-                ACCOUNT
+            }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
         ParamTestCaseBundle{
             .testName = "InvalidMPTIssuanceStringIndex",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "mpt_issuance": "invalid"
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
         ParamTestCaseBundle{
             .testName = "InvalidMPTIssuanceType",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "mpt_issuance": 0
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
         ParamTestCaseBundle{
             .testName = "InvalidMPTokenStringIndex",
-            .testJson = R"({
+            .testJson = R"JSON({
                 "mptoken": "invalid"
-            })",
+            })JSON",
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
         },
         ParamTestCaseBundle{
             .testName = "InvalidMPTokenObject",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "mptoken": {{}}
-                }})"
+                }})JSON"
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -2069,12 +2076,12 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "MissingMPTokenID",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "mptoken": {{
                         "account": "{}"
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -2082,15 +2089,15 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "CredentialInvalidCredentialType",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                 "credential": {{
                     "subject": "{}",
                     "issuer": "{}",
                     "credential_type": 1234
                 }}
-            }})",
-                ACCOUNT,
-                ACCOUNT2
+            }})JSON",
+                kACCOUNT,
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -2098,14 +2105,14 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "CredentialMissingIssuerField",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                 "credential": {{
                     "subject": "{}",
                     "credential_type": "1234"
                 }}
-            }})",
-                ACCOUNT,
-                ACCOUNT2
+            }})JSON",
+                kACCOUNT,
+                kACCOUNT2
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
@@ -2113,12 +2120,12 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "InvalidMPTokenAccount",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "mptoken": {{
                         "mpt_issuance_id": "0000019315EABA24E6135A4B5CE2899E0DA791206413B33D",
                         "account": 1
                     }}
-                }})"
+                }})JSON"
             ),
             .expectedError = "malformedAddress",
             .expectedErrorMessage = "Malformed address."
@@ -2126,13 +2133,238 @@ generateTestValuesForParametersTest()
         ParamTestCaseBundle{
             .testName = "InvalidMPTokenType",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "mptoken": 0
-                }})"
+                }})JSON"
             ),
             .expectedError = "malformedRequest",
             .expectedErrorMessage = "Malformed request."
-        }
+        },
+        ParamTestCaseBundle{
+            .testName = "InvalidPermissionedDomain_NotObject",
+            .testJson = R"JSON({"permissioned_domain": []})JSON",
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request.",
+        },
+        ParamTestCaseBundle{
+            .testName = "InvalidPermissionedDomain_InvalidString",
+            .testJson = R"JSON({"permissioned_domain": "invalid_string"})JSON",
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request.",
+        },
+        ParamTestCaseBundle{
+            .testName = "InvalidPermissionedDomain_EmptyObject",
+            .testJson = R"JSON({"permissioned_domain": {}})JSON",
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request.",
+        },
+        ParamTestCaseBundle{
+            .testName = "InvalidPermissionedDomain_BadAccount",
+            .testJson = R"JSON({"permissioned_domain": {"account": "1234", "seq": 1234}})JSON",
+            .expectedError = "malformedAddress",
+            .expectedErrorMessage = "Malformed address.",
+        },
+        ParamTestCaseBundle{
+            .testName = "InvalidPermissionedDomain_MissingSeq",
+            .testJson = fmt::format(
+                R"JSON({{
+                    "permissioned_domain": {{ "account": "{}" }}
+                }})JSON",
+                kACCOUNT
+            ),
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request.",
+        },
+        ParamTestCaseBundle{
+            .testName = "InvalidPermissionedDomain_SeqIsNotUint",
+            .testJson = fmt::format(
+                R"JSON({{
+                    "permissioned_domain": {{ "account": "{}", "seq": -1 }}
+                }})JSON",
+                kACCOUNT
+            ),
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request.",
+        },
+        ParamTestCaseBundle{
+            .testName = "InvalidPermissionedDomain_BothAccountAndSeqAreInvalid",
+            .testJson =
+                R"JSON({
+                    "permissioned_domain": { "account": "", "seq": -1 }
+                })JSON",
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request.",
+        },
+        ParamTestCaseBundle{
+            .testName = "InvalidVault_Type",
+            .testJson =
+                R"JSON({
+                    "vault": 0
+                })JSON",
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request.",
+        },
+        ParamTestCaseBundle{
+            .testName = "InvalidVault_NotHex",
+            .testJson =
+                R"JSON({
+                    "vault": "invalid_hex"
+                })JSON",
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request.",
+        },
+        ParamTestCaseBundle{
+            .testName = "MissingOwner",
+            .testJson =
+                R"JSON({
+                    "vault": { "seq": 1 }
+                })JSON",
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request.",
+        },
+
+        ParamTestCaseBundle{
+            .testName = "MissingSeq",
+            .testJson =
+                R"JSON({
+                    "vault": { "owner": "abcd" }
+                })JSON",
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request.",
+        },
+        ParamTestCaseBundle{
+            .testName = "SeqNotInteger",
+            .testJson =
+                R"JSON({
+                 "vault": {
+                    "owner": "abcd",
+                    "seq": "notAnInteger"
+                }})JSON",
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request.",
+        },
+        ParamTestCaseBundle{
+            .testName = "InvalidOwnerFormat",
+            .testJson =
+                R"JSON({
+                "vault": {
+                    "owner": "abcd",
+                    "seq": 10
+                }})JSON",
+            .expectedError = "malformedOwner",
+            .expectedErrorMessage = "Malformed owner.",
+        },
+        ParamTestCaseBundle{
+            .testName = "BothOwnerAndSeqInvalid",
+            .testJson =
+                R"JSON({
+                "vault": {
+                    "owner": "abcd",
+                    "seq": -200
+                }})JSON",
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request.",
+        },
+        ParamTestCaseBundle{
+            .testName = "Delegate_InvalidType",
+            .testJson = R"JSON({"delegate": 123})JSON",
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request."
+        },
+        ParamTestCaseBundle{
+            .testName = "Delegate_InvalidStringIndex",
+            .testJson = R"JSON({"delegate": "invalid_hex_string"})JSON",
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request."
+        },
+        ParamTestCaseBundle{
+            .testName = "Delegate_EmptyObject",
+            .testJson = R"JSON({"delegate": {}})JSON",
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request."
+        },
+        ParamTestCaseBundle{
+            .testName = "Delegate_MissingAccount",
+            .testJson = fmt::format(
+                R"JSON({{
+                    "delegate": {{
+                        "authorize": "{}"
+                    }}
+                }})JSON",
+                kACCOUNT2
+            ),
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request."
+        },
+        ParamTestCaseBundle{
+            .testName = "Delegate_AccountNotString",
+            .testJson = fmt::format(
+                R"JSON({{
+                    "delegate": {{
+                        "account": 123,
+                        "authorize": "{}"
+                    }}
+                }})JSON",
+                kACCOUNT2
+            ),
+            .expectedError = "malformedAddress",
+            .expectedErrorMessage = "Malformed address."
+        },
+        ParamTestCaseBundle{
+            .testName = "Delegate_AccountInvalid",
+            .testJson = fmt::format(
+                R"JSON({{
+                    "delegate": {{
+                        "account": "invalid_address",
+                        "authorize": "{}"
+                    }}
+                }})JSON",
+                kACCOUNT2
+            ),
+            .expectedError = "malformedAddress",
+            .expectedErrorMessage = "Malformed address."
+        },
+        ParamTestCaseBundle{
+            .testName = "Delegate_MissingAuthorize",
+            .testJson = fmt::format(
+                R"JSON({{
+                    "delegate": {{
+                        "account": "{}"
+                    }}
+                }})JSON",
+                kACCOUNT
+            ),
+            .expectedError = "malformedRequest",
+            .expectedErrorMessage = "Malformed request."
+        },
+        ParamTestCaseBundle{
+            .testName = "Delegate_AuthorizeNotString",
+            .testJson = fmt::format(
+                R"JSON({{
+                    "delegate": {{
+                        "account": "{}",
+                        "authorize": 123
+                    }}
+                }})JSON",
+                kACCOUNT
+            ),
+            .expectedError = "malformedAddress",
+            .expectedErrorMessage = "Malformed address."
+        },
+        ParamTestCaseBundle{
+            .testName = "Delegate_AuthorizeInvalid",
+            .testJson = fmt::format(
+                R"JSON({{
+                    "delegate": {{
+                        "account": "{}",
+                        "authorize": "invalid_address"
+                    }}
+                }})JSON",
+                kACCOUNT
+            ),
+            .expectedError = "malformedAddress",
+            .expectedErrorMessage = "Malformed address."
+        },
     };
 }
 
@@ -2140,14 +2372,14 @@ INSTANTIATE_TEST_CASE_P(
     RPCLedgerEntryGroup1,
     LedgerEntryParameterTest,
     ValuesIn(generateTestValuesForParametersTest()),
-    tests::util::NameGenerator
+    tests::util::kNAME_GENERATOR
 );
 
 TEST_P(LedgerEntryParameterTest, InvalidParams)
 {
     auto const testBundle = GetParam();
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(testBundle.testJson);
         auto const output = handler.process(req, Context{yield});
         ASSERT_FALSE(output);
@@ -2182,11 +2414,11 @@ TEST_P(IndexTest, InvalidIndexUint256)
 {
     auto const index = GetParam();
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(fmt::format(
-            R"({{
+            R"JSON({{
                 "{}": "invalid"
-            }})",
+            }})JSON",
             index
         ));
         auto const output = handler.process(req, Context{yield});
@@ -2202,11 +2434,11 @@ TEST_P(IndexTest, InvalidIndexNotString)
 {
     auto const index = GetParam();
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(fmt::format(
-            R"({{
+            R"JSON({{
                 "{}": 123
-            }})",
+            }})JSON",
             index
         ));
         auto const output = handler.process(req, Context{yield});
@@ -2221,20 +2453,20 @@ TEST_P(IndexTest, InvalidIndexNotString)
 TEST_F(RPCLedgerEntryTest, LedgerEntryNotFound)
 {
     // return valid ledgerHeader
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, RANGEMAX);
-    EXPECT_CALL(*backend, fetchLedgerBySequence(RANGEMAX, _)).WillRepeatedly(Return(ledgerHeader));
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, kRANGE_MAX);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kRANGE_MAX, _)).WillRepeatedly(Return(ledgerHeader));
 
     // return null for ledger entry
-    auto const key = ripple::keylet::account(GetAccountIDWithString(ACCOUNT)).key;
-    EXPECT_CALL(*backend, doFetchLedgerObject(key, RANGEMAX, _)).WillRepeatedly(Return(std::optional<Blob>{}));
+    auto const key = ripple::keylet::account(getAccountIdWithString(kACCOUNT)).key;
+    EXPECT_CALL(*backend_, doFetchLedgerObject(key, kRANGE_MAX, _)).WillRepeatedly(Return(std::optional<Blob>{}));
 
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(fmt::format(
-            R"({{
+            R"JSON({{
                 "account_root": "{}"
-            }})",
-            ACCOUNT
+            }})JSON",
+            kACCOUNT
         ));
         auto const output = handler.process(req, Context{yield});
         ASSERT_FALSE(output);
@@ -2255,8 +2487,8 @@ struct RPCLedgerEntryNormalPathTest : public RPCLedgerEntryTest, public WithPara
 static auto
 generateTestValuesForNormalPathTest()
 {
-    auto account1 = GetAccountIDWithString(ACCOUNT);
-    auto account2 = GetAccountIDWithString(ACCOUNT2);
+    auto account1 = getAccountIdWithString(kACCOUNT);
+    auto account2 = getAccountIdWithString(kACCOUNT2);
     ripple::Currency currency;
     ripple::to_currency(currency, "USD");
 
@@ -2264,219 +2496,219 @@ generateTestValuesForNormalPathTest()
         NormalPathTestBundle{
             .testName = "Index",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "index": "{}"
-                }})",
-                INDEX1
+                }})JSON",
+                kINDEX1
             ),
-            .expectedIndex = ripple::uint256{INDEX1},
-            .mockedEntity = CreateAccountRootObject(ACCOUNT2, ripple::lsfGlobalFreeze, 1, 10, 2, INDEX1, 3)
+            .expectedIndex = ripple::uint256{kINDEX1},
+            .mockedEntity = createAccountRootObject(kACCOUNT2, ripple::lsfGlobalFreeze, 1, 10, 2, kINDEX1, 3)
         },
         NormalPathTestBundle{
             .testName = "Payment_channel",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "payment_channel": "{}"
-                }})",
-                INDEX1
+                }})JSON",
+                kINDEX1
             ),
-            .expectedIndex = ripple::uint256{INDEX1},
-            .mockedEntity = CreatePaymentChannelLedgerObject(ACCOUNT, ACCOUNT2, 100, 200, 300, INDEX1, 400)
+            .expectedIndex = ripple::uint256{kINDEX1},
+            .mockedEntity = createPaymentChannelLedgerObject(kACCOUNT, kACCOUNT2, 100, 200, 300, kINDEX1, 400)
         },
         NormalPathTestBundle{
             .testName = "Nft_page",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "nft_page": "{}"
-                }})",
-                INDEX1
+                }})JSON",
+                kINDEX1
             ),
-            .expectedIndex = ripple::uint256{INDEX1},
-            .mockedEntity = CreateNFTTokenPage(
-                std::vector{std::make_pair<std::string, std::string>(TOKENID, "www.ok.com")}, std::nullopt
+            .expectedIndex = ripple::uint256{kINDEX1},
+            .mockedEntity = createNftTokenPage(
+                std::vector{std::make_pair<std::string, std::string>(kTOKEN_ID, "www.ok.com")}, std::nullopt
             )
         },
         NormalPathTestBundle{
             .testName = "Check",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "check": "{}"
-                }})",
-                INDEX1
+                }})JSON",
+                kINDEX1
             ),
-            .expectedIndex = ripple::uint256{INDEX1},
-            .mockedEntity = CreateCheckLedgerObject(ACCOUNT, ACCOUNT2)
+            .expectedIndex = ripple::uint256{kINDEX1},
+            .mockedEntity = createCheckLedgerObject(kACCOUNT, kACCOUNT2)
         },
         NormalPathTestBundle{
             .testName = "DirectoryIndex",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "directory": "{}"
-                }})",
-                INDEX1
+                }})JSON",
+                kINDEX1
             ),
-            .expectedIndex = ripple::uint256{INDEX1},
-            .mockedEntity = CreateOwnerDirLedgerObject(std::vector<ripple::uint256>{ripple::uint256{INDEX1}}, INDEX1)
+            .expectedIndex = ripple::uint256{kINDEX1},
+            .mockedEntity = createOwnerDirLedgerObject(std::vector<ripple::uint256>{ripple::uint256{kINDEX1}}, kINDEX1)
         },
         NormalPathTestBundle{
             .testName = "OfferIndex",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "offer": "{}"
-                }})",
-                INDEX1
+                }})JSON",
+                kINDEX1
             ),
-            .expectedIndex = ripple::uint256{INDEX1},
-            .mockedEntity = CreateOfferLedgerObject(
-                ACCOUNT, 100, 200, "USD", "XRP", ACCOUNT2, ripple::toBase58(ripple::xrpAccount()), INDEX1
+            .expectedIndex = ripple::uint256{kINDEX1},
+            .mockedEntity = createOfferLedgerObject(
+                kACCOUNT, 100, 200, "USD", "XRP", kACCOUNT2, ripple::toBase58(ripple::xrpAccount()), kINDEX1
             )
         },
         NormalPathTestBundle{
             .testName = "EscrowIndex",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "escrow": "{}"
-                }})",
-                INDEX1
+                }})JSON",
+                kINDEX1
             ),
-            .expectedIndex = ripple::uint256{INDEX1},
-            .mockedEntity = CreateEscrowLedgerObject(ACCOUNT, ACCOUNT2)
+            .expectedIndex = ripple::uint256{kINDEX1},
+            .mockedEntity = createEscrowLedgerObject(kACCOUNT, kACCOUNT2)
         },
         NormalPathTestBundle{
             .testName = "TicketIndex",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "ticket": "{}"
-                }})",
-                INDEX1
+                }})JSON",
+                kINDEX1
             ),
-            .expectedIndex = ripple::uint256{INDEX1},
-            .mockedEntity = CreateTicketLedgerObject(ACCOUNT, 0)
+            .expectedIndex = ripple::uint256{kINDEX1},
+            .mockedEntity = createTicketLedgerObject(kACCOUNT, 0)
         },
         NormalPathTestBundle{
             .testName = "DepositPreauthIndex",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "deposit_preauth": "{}"
-                }})",
-                INDEX1
+                }})JSON",
+                kINDEX1
             ),
-            .expectedIndex = ripple::uint256{INDEX1},
-            .mockedEntity = CreateDepositPreauthLedgerObjectByAuth(ACCOUNT, ACCOUNT2)
+            .expectedIndex = ripple::uint256{kINDEX1},
+            .mockedEntity = createDepositPreauthLedgerObjectByAuth(kACCOUNT, kACCOUNT2)
         },
         NormalPathTestBundle{
             .testName = "AccountRoot",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "account_root": "{}"
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
-            .expectedIndex = ripple::keylet::account(GetAccountIDWithString(ACCOUNT)).key,
-            .mockedEntity = CreateAccountRootObject(ACCOUNT, 0, 1, 1, 1, INDEX1, 1)
+            .expectedIndex = ripple::keylet::account(getAccountIdWithString(kACCOUNT)).key,
+            .mockedEntity = createAccountRootObject(kACCOUNT, 0, 1, 1, 1, kINDEX1, 1)
         },
         NormalPathTestBundle{
             .testName = "DID",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "did": "{}"
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
-            .expectedIndex = ripple::keylet::did(GetAccountIDWithString(ACCOUNT)).key,
-            .mockedEntity = CreateDidObject(ACCOUNT, "mydocument", "myURI", "mydata")
+            .expectedIndex = ripple::keylet::did(getAccountIdWithString(kACCOUNT)).key,
+            .mockedEntity = createDidObject(kACCOUNT, "mydocument", "myURI", "mydata")
         },
         NormalPathTestBundle{
             .testName = "DirectoryViaDirRoot",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "directory": {{
                         "dir_root": "{}",
                         "sub_index": 2
                     }}
-                }})",
-                INDEX1
+                }})JSON",
+                kINDEX1
             ),
-            .expectedIndex = ripple::keylet::page(ripple::uint256{INDEX1}, 2).key,
-            .mockedEntity = CreateOwnerDirLedgerObject(std::vector<ripple::uint256>{ripple::uint256{INDEX1}}, INDEX1)
+            .expectedIndex = ripple::keylet::page(ripple::uint256{kINDEX1}, 2).key,
+            .mockedEntity = createOwnerDirLedgerObject(std::vector<ripple::uint256>{ripple::uint256{kINDEX1}}, kINDEX1)
         },
         NormalPathTestBundle{
             .testName = "DirectoryViaOwner",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "directory": {{
                         "owner": "{}",
                         "sub_index": 2
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedIndex = ripple::keylet::page(ripple::keylet::ownerDir(account1), 2).key,
-            .mockedEntity = CreateOwnerDirLedgerObject(std::vector<ripple::uint256>{ripple::uint256{INDEX1}}, INDEX1)
+            .mockedEntity = createOwnerDirLedgerObject(std::vector<ripple::uint256>{ripple::uint256{kINDEX1}}, kINDEX1)
         },
         NormalPathTestBundle{
             .testName = "DirectoryViaDefaultSubIndex",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "directory": {{
                         "owner": "{}"
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             // default sub_index is 0
             .expectedIndex = ripple::keylet::page(ripple::keylet::ownerDir(account1), 0).key,
-            .mockedEntity = CreateOwnerDirLedgerObject(std::vector<ripple::uint256>{ripple::uint256{INDEX1}}, INDEX1)
+            .mockedEntity = createOwnerDirLedgerObject(std::vector<ripple::uint256>{ripple::uint256{kINDEX1}}, kINDEX1)
         },
         NormalPathTestBundle{
             .testName = "Escrow",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "escrow": {{
                         "owner": "{}",
                         "seq": 1
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedIndex = ripple::keylet::escrow(account1, 1).key,
-            .mockedEntity = CreateEscrowLedgerObject(ACCOUNT, ACCOUNT2)
+            .mockedEntity = createEscrowLedgerObject(kACCOUNT, kACCOUNT2)
         },
         NormalPathTestBundle{
             .testName = "DepositPreauthByAuth",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "deposit_preauth": {{
                         "owner": "{}",
                         "authorized": "{}"
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT2
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT2
             ),
             .expectedIndex = ripple::keylet::depositPreauth(account1, account2).key,
-            .mockedEntity = CreateDepositPreauthLedgerObjectByAuth(ACCOUNT, ACCOUNT2)
+            .mockedEntity = createDepositPreauthLedgerObjectByAuth(kACCOUNT, kACCOUNT2)
         },
         NormalPathTestBundle{
             .testName = "DepositPreauthByAuthCredentials",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                        "binary": true,
                        "deposit_preauth": {{
                            "owner": "{}",
@@ -2487,110 +2719,112 @@ generateTestValuesForNormalPathTest()
                                }}
                            ]
                        }}
-                   }})",
-                ACCOUNT,
-                ACCOUNT2,
-                CREDENTIALTYPE
+                   }})JSON",
+                kACCOUNT,
+                kACCOUNT2,
+                kCREDENTIAL_TYPE
             ),
             .expectedIndex =
                 ripple::keylet::depositPreauth(
                     account1,
-                    credentials::createAuthCredentials(CreateAuthCredentialArray(
-                        std::vector<std::string_view>{ACCOUNT2}, std::vector<std::string_view>{CREDENTIALTYPE}
+                    credentials::createAuthCredentials(createAuthCredentialArray(
+                        std::vector<std::string_view>{kACCOUNT2}, std::vector<std::string_view>{kCREDENTIAL_TYPE}
                     ))
                 )
                     .key,
-            .mockedEntity = CreateDepositPreauthLedgerObjectByAuthCredentials(ACCOUNT, ACCOUNT2, CREDENTIALTYPE)
+            .mockedEntity = createDepositPreauthLedgerObjectByAuthCredentials(kACCOUNT, kACCOUNT2, kCREDENTIAL_TYPE)
         },
         NormalPathTestBundle{
             .testName = "Credentials",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "credential": {{
                         "subject": "{}",
                         "issuer": "{}",
                         "credential_type": "{}"
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT2,
-                CREDENTIALTYPE
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT2,
+                kCREDENTIAL_TYPE
             ),
             .expectedIndex =
                 ripple::keylet::credential(
                     account1,
                     account2,
-                    ripple::Slice(ripple::strUnHex(CREDENTIALTYPE)->data(), ripple::strUnHex(CREDENTIALTYPE)->size())
+                    ripple::Slice(
+                        ripple::strUnHex(kCREDENTIAL_TYPE)->data(), ripple::strUnHex(kCREDENTIAL_TYPE)->size()
+                    )
                 )
                     .key,
-            .mockedEntity = CreateCredentialObject(ACCOUNT, ACCOUNT2, CREDENTIALTYPE)
+            .mockedEntity = createCredentialObject(kACCOUNT, kACCOUNT2, kCREDENTIAL_TYPE)
         },
         NormalPathTestBundle{
             .testName = "RippleState",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "ripple_state": {{
-                        "accounts": ["{}","{}"],
+                        "accounts": ["{}", "{}"],
                         "currency": "USD"
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT2
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT2
             ),
             .expectedIndex = ripple::keylet::line(account1, account2, currency).key,
             .mockedEntity =
-                CreateRippleStateLedgerObject("USD", ACCOUNT2, 100, ACCOUNT, 10, ACCOUNT2, 20, INDEX1, 123, 0)
+                createRippleStateLedgerObject("USD", kACCOUNT2, 100, kACCOUNT, 10, kACCOUNT2, 20, kINDEX1, 123, 0)
         },
         NormalPathTestBundle{
             .testName = "Ticket",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "ticket": {{
                         "account": "{}",
                         "ticket_seq": 2
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedIndex = ripple::getTicketIndex(account1, 2),
-            .mockedEntity = CreateTicketLedgerObject(ACCOUNT, 0)
+            .mockedEntity = createTicketLedgerObject(kACCOUNT, 0)
         },
         NormalPathTestBundle{
             .testName = "Offer",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "offer": {{
                         "account": "{}",
                         "seq": 2
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
             .expectedIndex = ripple::keylet::offer(account1, 2).key,
-            .mockedEntity = CreateOfferLedgerObject(
-                ACCOUNT, 100, 200, "USD", "XRP", ACCOUNT2, ripple::toBase58(ripple::xrpAccount()), INDEX1
+            .mockedEntity = createOfferLedgerObject(
+                kACCOUNT, 100, 200, "USD", "XRP", kACCOUNT2, ripple::toBase58(ripple::xrpAccount()), kINDEX1
             )
         },
         NormalPathTestBundle{
             .testName = "AMMViaIndex",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "amm": "{}"
-                }})",
-                INDEX1
+                }})JSON",
+                kINDEX1
             ),
-            .expectedIndex = ripple::uint256{INDEX1},
-            .mockedEntity = CreateAMMObject(ACCOUNT, "XRP", ripple::toBase58(ripple::xrpAccount()), "JPY", ACCOUNT2)
+            .expectedIndex = ripple::uint256{kINDEX1},
+            .mockedEntity = createAmmObject(kACCOUNT, "XRP", ripple::toBase58(ripple::xrpAccount()), "JPY", kACCOUNT2)
         },
         NormalPathTestBundle{
             .testName = "AMMViaJson",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "amm": {{
                         "asset": {{
@@ -2601,270 +2835,378 @@ generateTestValuesForNormalPathTest()
                             "issuer": "{}"
                         }}
                     }}
-                }})",
+                }})JSON",
                 "JPY",
-                ACCOUNT2
+                kACCOUNT2
             ),
             .expectedIndex =
-                ripple::keylet::amm(GetIssue("XRP", ripple::toBase58(ripple::xrpAccount())), GetIssue("JPY", ACCOUNT2))
+                ripple::keylet::amm(getIssue("XRP", ripple::toBase58(ripple::xrpAccount())), getIssue("JPY", kACCOUNT2))
                     .key,
-            .mockedEntity = CreateAMMObject(ACCOUNT, "XRP", ripple::toBase58(ripple::xrpAccount()), "JPY", ACCOUNT2)
+            .mockedEntity = createAmmObject(kACCOUNT, "XRP", ripple::toBase58(ripple::xrpAccount()), "JPY", kACCOUNT2)
         },
         NormalPathTestBundle{
             .testName = "BridgeLocking",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "bridge_account": "{}",
                     "bridge": {{
                         "LockingChainDoor": "{}",
                         "IssuingChainDoor": "{}",
                         "LockingChainIssue": {{
-                            "currency" : "XRP"
+                            "currency": "XRP"
                         }},
                         "IssuingChainIssue": {{
-                            "currency" : "JPY",
-                            "issuer" : "{}"
+                            "currency": "JPY",
+                            "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT,
-                ACCOUNT2,
-                ACCOUNT3
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT,
+                kACCOUNT2,
+                kACCOUNT3
             ),
             .expectedIndex = ripple::keylet::bridge(
                                  ripple::STXChainBridge(
-                                     GetAccountIDWithString(ACCOUNT),
+                                     getAccountIdWithString(kACCOUNT),
                                      ripple::xrpIssue(),
-                                     GetAccountIDWithString(ACCOUNT2),
-                                     GetIssue("JPY", ACCOUNT3)
+                                     getAccountIdWithString(kACCOUNT2),
+                                     getIssue("JPY", kACCOUNT3)
                                  ),
                                  ripple::STXChainBridge::ChainType::locking
             )
                                  .key,
-            .mockedEntity = CreateBridgeObject(ACCOUNT, ACCOUNT, ACCOUNT2, "JPY", ACCOUNT3)
+            .mockedEntity = createBridgeObject(kACCOUNT, kACCOUNT, kACCOUNT2, "JPY", kACCOUNT3)
         },
         NormalPathTestBundle{
             .testName = "BridgeIssuing",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "bridge_account": "{}",
                     "bridge": {{
                         "LockingChainDoor": "{}",
                         "IssuingChainDoor": "{}",
                         "LockingChainIssue": {{
-                            "currency" : "XRP"
+                            "currency": "XRP"
                         }},
                         "IssuingChainIssue": {{
-                            "currency" : "JPY",
-                            "issuer" : "{}"
+                            "currency": "JPY",
+                            "issuer": "{}"
                         }}
                     }}
-                }})",
-                ACCOUNT2,
-                ACCOUNT,
-                ACCOUNT2,
-                ACCOUNT3
+                }})JSON",
+                kACCOUNT2,
+                kACCOUNT,
+                kACCOUNT2,
+                kACCOUNT3
             ),
             .expectedIndex = ripple::keylet::bridge(
                                  ripple::STXChainBridge(
-                                     GetAccountIDWithString(ACCOUNT),
+                                     getAccountIdWithString(kACCOUNT),
                                      ripple::xrpIssue(),
-                                     GetAccountIDWithString(ACCOUNT2),
-                                     GetIssue("JPY", ACCOUNT3)
+                                     getAccountIdWithString(kACCOUNT2),
+                                     getIssue("JPY", kACCOUNT3)
                                  ),
                                  ripple::STXChainBridge::ChainType::issuing
             )
                                  .key,
-            .mockedEntity = CreateBridgeObject(ACCOUNT, ACCOUNT, ACCOUNT2, "JPY", ACCOUNT3)
+            .mockedEntity = createBridgeObject(kACCOUNT, kACCOUNT, kACCOUNT2, "JPY", kACCOUNT3)
         },
         NormalPathTestBundle{
             .testName = "XChainOwnedClaimId",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "xchain_owned_claim_id": {{
                         "LockingChainDoor": "{}",
                         "IssuingChainDoor": "{}",
                         "LockingChainIssue": {{
-                            "currency" : "XRP"
+                            "currency": "XRP"
                         }},
                         "IssuingChainIssue": {{
-                            "currency" : "JPY",
-                            "issuer" : "{}"
+                            "currency": "JPY",
+                            "issuer": "{}"
                         }},
                         "xchain_owned_claim_id": 10
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT2,
-                ACCOUNT3
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT2,
+                kACCOUNT3
             ),
             .expectedIndex = ripple::keylet::xChainClaimID(
                                  ripple::STXChainBridge(
-                                     GetAccountIDWithString(ACCOUNT),
+                                     getAccountIdWithString(kACCOUNT),
                                      ripple::xrpIssue(),
-                                     GetAccountIDWithString(ACCOUNT2),
-                                     GetIssue("JPY", ACCOUNT3)
+                                     getAccountIdWithString(kACCOUNT2),
+                                     getIssue("JPY", kACCOUNT3)
                                  ),
                                  10
             )
                                  .key,
-            .mockedEntity = CreateChainOwnedClaimIDObject(ACCOUNT, ACCOUNT, ACCOUNT2, "JPY", ACCOUNT3, ACCOUNT)
+            .mockedEntity = createChainOwnedClaimIdObject(kACCOUNT, kACCOUNT, kACCOUNT2, "JPY", kACCOUNT3, kACCOUNT)
         },
         NormalPathTestBundle{
             .testName = "XChainOwnedCreateAccountClaimId",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "xchain_owned_create_account_claim_id": {{
                         "LockingChainDoor": "{}",
                         "IssuingChainDoor": "{}",
                         "LockingChainIssue": {{
-                            "currency" : "XRP"
+                            "currency": "XRP"
                         }},
                         "IssuingChainIssue": {{
-                            "currency" : "JPY",
-                            "issuer" : "{}"
+                            "currency": "JPY",
+                            "issuer": "{}"
                         }},
                         "xchain_owned_create_account_claim_id": 10
                     }}
-                }})",
-                ACCOUNT,
-                ACCOUNT2,
-                ACCOUNT3
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT2,
+                kACCOUNT3
             ),
             .expectedIndex = ripple::keylet::xChainCreateAccountClaimID(
                                  ripple::STXChainBridge(
-                                     GetAccountIDWithString(ACCOUNT),
+                                     getAccountIdWithString(kACCOUNT),
                                      ripple::xrpIssue(),
-                                     GetAccountIDWithString(ACCOUNT2),
-                                     GetIssue("JPY", ACCOUNT3)
+                                     getAccountIdWithString(kACCOUNT2),
+                                     getIssue("JPY", kACCOUNT3)
                                  ),
                                  10
             )
                                  .key,
-            .mockedEntity = CreateChainOwnedClaimIDObject(ACCOUNT, ACCOUNT, ACCOUNT2, "JPY", ACCOUNT3, ACCOUNT)
+            .mockedEntity = createChainOwnedClaimIdObject(kACCOUNT, kACCOUNT, kACCOUNT2, "JPY", kACCOUNT3, kACCOUNT)
         },
         NormalPathTestBundle{
             .testName = "OracleEntryFoundViaIntOracleDocumentId",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "oracle": {{
                         "account": "{}",
                         "oracle_document_id": 1
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
-            .expectedIndex = ripple::keylet::oracle(GetAccountIDWithString(ACCOUNT), 1).key,
-            .mockedEntity = CreateOracleObject(
-                ACCOUNT,
+            .expectedIndex = ripple::keylet::oracle(getAccountIdWithString(kACCOUNT), 1).key,
+            .mockedEntity = createOracleObject(
+                kACCOUNT,
                 "70726F7669646572",
                 32u,
                 1234u,
                 ripple::Blob(8, 's'),
                 ripple::Blob(8, 's'),
-                RANGEMAX - 2,
+                kRANGE_MAX - 2,
                 ripple::uint256{"E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321"},
-                CreatePriceDataSeries(
-                    {CreateOraclePriceData(2e4, ripple::to_currency("XRP"), ripple::to_currency("USD"), 3)}
+                createPriceDataSeries(
+                    {createOraclePriceData(2e4, ripple::to_currency("XRP"), ripple::to_currency("USD"), 3)}
                 )
             )
         },
         NormalPathTestBundle{
             .testName = "OracleEntryFoundViaStrOracleDocumentId",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "oracle": {{
                         "account": "{}",
                         "oracle_document_id": "1"
                     }}
-                }})",
-                ACCOUNT
+                }})JSON",
+                kACCOUNT
             ),
-            .expectedIndex = ripple::keylet::oracle(GetAccountIDWithString(ACCOUNT), 1).key,
-            .mockedEntity = CreateOracleObject(
-                ACCOUNT,
+            .expectedIndex = ripple::keylet::oracle(getAccountIdWithString(kACCOUNT), 1).key,
+            .mockedEntity = createOracleObject(
+                kACCOUNT,
                 "70726F7669646572",
                 32u,
                 1234u,
                 ripple::Blob(8, 's'),
                 ripple::Blob(8, 's'),
-                RANGEMAX - 2,
+                kRANGE_MAX - 2,
                 ripple::uint256{"E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321"},
-                CreatePriceDataSeries(
-                    {CreateOraclePriceData(2e4, ripple::to_currency("XRP"), ripple::to_currency("USD"), 3)}
+                createPriceDataSeries(
+                    {createOraclePriceData(2e4, ripple::to_currency("XRP"), ripple::to_currency("USD"), 3)}
                 )
             )
         },
         NormalPathTestBundle{
             .testName = "OracleEntryFoundViaString",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "oracle": "{}"
-                }})",
-                ripple::to_string(ripple::keylet::oracle(GetAccountIDWithString(ACCOUNT), 1).key)
+                }})JSON",
+                ripple::to_string(ripple::keylet::oracle(getAccountIdWithString(kACCOUNT), 1).key)
             ),
-            .expectedIndex = ripple::keylet::oracle(GetAccountIDWithString(ACCOUNT), 1).key,
-            .mockedEntity = CreateOracleObject(
-                ACCOUNT,
+            .expectedIndex = ripple::keylet::oracle(getAccountIdWithString(kACCOUNT), 1).key,
+            .mockedEntity = createOracleObject(
+                kACCOUNT,
                 "70726F7669646572",
                 64u,
                 4321u,
                 ripple::Blob(8, 'a'),
                 ripple::Blob(8, 'a'),
-                RANGEMAX - 4,
+                kRANGE_MAX - 4,
                 ripple::uint256{"E6DBAFC99223B42257915A63DFC6B0C032D4070F9A574B255AD97466726FC321"},
-                CreatePriceDataSeries(
-                    {CreateOraclePriceData(1e3, ripple::to_currency("USD"), ripple::to_currency("XRP"), 2)}
+                createPriceDataSeries(
+                    {createOraclePriceData(1e3, ripple::to_currency("USD"), ripple::to_currency("XRP"), 2)}
                 )
             )
         },
         NormalPathTestBundle{
             .testName = "MPTIssuance",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "mpt_issuance": "{}"
-                }})",
+                }})JSON",
                 ripple::to_string(ripple::makeMptID(2, account1))
             ),
             .expectedIndex = ripple::keylet::mptIssuance(ripple::makeMptID(2, account1)).key,
-            .mockedEntity = CreateMPTIssuanceObject(ACCOUNT, 2, "metadata")
+            .mockedEntity = createMptIssuanceObject(kACCOUNT, 2, "metadata")
         },
         NormalPathTestBundle{
             .testName = "MPTokenViaIndex",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "mptoken": "{}"
-                }})",
-                INDEX1
+                }})JSON",
+                kINDEX1
             ),
-            .expectedIndex = ripple::uint256{INDEX1},
-            .mockedEntity = CreateMPTokenObject(ACCOUNT, ripple::makeMptID(2, account1))
+            .expectedIndex = ripple::uint256{kINDEX1},
+            .mockedEntity = createMpTokenObject(kACCOUNT, ripple::makeMptID(2, account1))
         },
         NormalPathTestBundle{
             .testName = "MPTokenViaObject",
             .testJson = fmt::format(
-                R"({{
+                R"JSON({{
                     "binary": true,
                     "mptoken": {{
                         "account": "{}",
                         "mpt_issuance_id": "{}"
                     }}
-                }})",
-                ACCOUNT,
+                }})JSON",
+                kACCOUNT,
                 ripple::to_string(ripple::makeMptID(2, account1))
             ),
             .expectedIndex = ripple::keylet::mptoken(ripple::makeMptID(2, account1), account1).key,
-            .mockedEntity = CreateMPTokenObject(ACCOUNT, ripple::makeMptID(2, account1))
+            .mockedEntity = createMpTokenObject(kACCOUNT, ripple::makeMptID(2, account1))
+        },
+        NormalPathTestBundle{
+            .testName = "PermissionedDomainViaString",
+            .testJson = fmt::format(
+                R"JSON({{
+                    "binary": true,
+                    "permissioned_domain": "{}"
+                }})JSON",
+                kINDEX1
+            ),
+            .expectedIndex = ripple::uint256(kINDEX1),
+            .mockedEntity = createPermissionedDomainObject(kACCOUNT, kINDEX1, kRANGE_MAX, 0, ripple::uint256{0}, 0)
+        },
+        NormalPathTestBundle{
+            .testName = "PermissionedDomainViaObject",
+            .testJson = fmt::format(
+                R"JSON({{
+                    "binary": true,
+                    "permissioned_domain": {{
+                        "account": "{}",
+                        "seq": {}
+                    }}
+                }})JSON",
+                kACCOUNT,
+                kRANGE_MAX
+            ),
+            .expectedIndex =
+                ripple::keylet::permissionedDomain(ripple::parseBase58<ripple::AccountID>(kACCOUNT).value(), kRANGE_MAX)
+                    .key,
+            .mockedEntity = createPermissionedDomainObject(kACCOUNT, kINDEX1, kRANGE_MAX, 0, ripple::uint256{0}, 0)
+        },
+        NormalPathTestBundle{
+            .testName = "CreateVaultObjectByHexString",
+            .testJson = fmt::format(
+                R"JSON({{
+                    "binary": true,
+                    "vault": "{}"
+                }})JSON",
+                kINDEX1
+            ),
+            .expectedIndex = ripple::uint256(kINDEX1),
+            .mockedEntity = createVault(
+                kACCOUNT,
+                kACCOUNT,
+                kRANGE_MAX,
+                "XRP",
+                ripple::toBase58(ripple::xrpAccount()),
+                ripple::uint192(0),
+                0,
+                ripple::uint256{0},
+                0
+            )
+        },
+        NormalPathTestBundle{
+            .testName = "CreateVaultObjectByAccount",
+            .testJson = fmt::format(
+                R"JSON({{
+                    "binary": true,
+                    "vault": {{
+                        "owner": "{}",
+                        "seq": {}
+                    }}
+                }})JSON",
+                kACCOUNT,
+                kRANGE_MAX
+            ),
+            .expectedIndex =
+                ripple::keylet::vault(ripple::parseBase58<ripple::AccountID>(kACCOUNT).value(), kRANGE_MAX).key,
+            .mockedEntity = createVault(
+                kACCOUNT,
+                kACCOUNT,
+                kRANGE_MAX,
+                "XRP",
+                ripple::toBase58(ripple::xrpAccount()),
+                ripple::uint192(0),
+                0,
+                ripple::uint256{0},
+                0
+            )
+        },
+        NormalPathTestBundle{
+            .testName = "DelegateViaStringIndex",
+            .testJson = fmt::format(
+                R"JSON({{
+                    "binary": true,
+                    "delegate": "{}"
+                }})JSON",
+                kINDEX1
+            ),
+            .expectedIndex = ripple::uint256{kINDEX1},
+            .mockedEntity = createDelegateObject(kACCOUNT, kACCOUNT2, kINDEX1, 0, ripple::uint256{0}, 0)
+        },
+        NormalPathTestBundle{
+            .testName = "DelegateViaObject",
+            .testJson = fmt::format(
+                R"JSON({{
+                    "binary": true,
+                    "delegate": {{
+                        "account": "{}",
+                        "authorize": "{}"
+                    }}
+                }})JSON",
+                kACCOUNT,
+                kACCOUNT2
+            ),
+            .expectedIndex =
+                ripple::keylet::delegate(getAccountIdWithString(kACCOUNT), getAccountIdWithString(kACCOUNT2)).key,
+            .mockedEntity = createDelegateObject(kACCOUNT, kACCOUNT2, kINDEX1, 0, ripple::uint256{0}, 0)
         },
     };
 }
@@ -2873,7 +3215,7 @@ INSTANTIATE_TEST_CASE_P(
     RPCLedgerEntryGroup2,
     RPCLedgerEntryNormalPathTest,
     ValuesIn(generateTestValuesForNormalPathTest()),
-    tests::util::NameGenerator
+    tests::util::kNAME_GENERATOR
 );
 
 // Test for normal path
@@ -2883,26 +3225,25 @@ TEST_P(RPCLedgerEntryNormalPathTest, NormalPath)
     auto const testBundle = GetParam();
 
     // return valid ledgerHeader
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, RANGEMAX);
-    EXPECT_CALL(*backend, fetchLedgerBySequence(RANGEMAX, _)).WillRepeatedly(Return(ledgerHeader));
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, kRANGE_MAX);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kRANGE_MAX, _)).WillRepeatedly(Return(ledgerHeader));
 
-    EXPECT_CALL(*backend, doFetchLedgerObject(testBundle.expectedIndex, RANGEMAX, _))
+    EXPECT_CALL(*backend_, doFetchLedgerObject(testBundle.expectedIndex, kRANGE_MAX, _))
         .WillRepeatedly(Return(testBundle.mockedEntity.getSerializer().peekData()));
 
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(testBundle.testJson);
         auto const output = handler.process(req, Context{yield});
         ASSERT_TRUE(output);
-        EXPECT_EQ(output.result.value().at("ledger_hash").as_string(), LEDGERHASH);
-        EXPECT_EQ(output.result.value().at("ledger_index").as_uint64(), RANGEMAX);
+        auto const& outputJson = output.result.value();
+        EXPECT_EQ(outputJson.at("ledger_hash").as_string(), kLEDGER_HASH);
+        EXPECT_EQ(outputJson.at("ledger_index").as_uint64(), kRANGE_MAX);
         EXPECT_EQ(
-            output.result.value().at("node_binary").as_string(),
-            ripple::strHex(testBundle.mockedEntity.getSerializer().peekData())
+            outputJson.at("node_binary").as_string(), ripple::strHex(testBundle.mockedEntity.getSerializer().peekData())
         );
         EXPECT_EQ(
-            ripple::uint256(boost::json::value_to<std::string>(output.result.value().at("index")).data()),
-            testBundle.expectedIndex
+            ripple::uint256(boost::json::value_to<std::string>(outputJson.at("index")).data()), testBundle.expectedIndex
         );
     });
 }
@@ -2910,68 +3251,119 @@ TEST_P(RPCLedgerEntryNormalPathTest, NormalPath)
 // this testcase will test the deserialization of ledger entry
 TEST_F(RPCLedgerEntryTest, BinaryFalse)
 {
-    static auto constexpr OUT = R"({
-        "ledger_hash":"4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652",
-        "ledger_index":30,
-        "validated":true,
-        "index":"05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD",
-        "node":{
-            "Account":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-            "Amount":"100",
-            "Balance":"200",
-            "Destination":"rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun",
-            "Flags":0,
-            "LedgerEntryType":"PayChannel",
-            "OwnerNode":"0",
-            "PreviousTxnID":"05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD",
-            "PreviousTxnLgrSeq":400,
-            "PublicKey":"020000000000000000000000000000000000000000000000000000000000000000",
-            "SettleDelay":300,
-            "index":"05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD"
+    static constexpr auto kOUT = R"JSON({
+        "ledger_hash": "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652",
+        "ledger_index": 30,
+        "validated": true,
+        "index": "05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD",
+        "node": {
+            "Account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+            "Amount": "100",
+            "Balance": "200",
+            "Destination": "rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun",
+            "Flags": 0,
+            "LedgerEntryType": "PayChannel",
+            "OwnerNode": "0",
+            "PreviousTxnID": "05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD",
+            "PreviousTxnLgrSeq": 400,
+            "PublicKey": "020000000000000000000000000000000000000000000000000000000000000000",
+            "SettleDelay": 300,
+            "index": "05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD"
         }
-    })";
+    })JSON";
 
     // return valid ledgerHeader
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, RANGEMAX);
-    EXPECT_CALL(*backend, fetchLedgerBySequence(RANGEMAX, _)).WillRepeatedly(Return(ledgerHeader));
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, kRANGE_MAX);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kRANGE_MAX, _)).WillRepeatedly(Return(ledgerHeader));
 
     // return valid ledger entry which can be deserialized
-    auto const ledgerEntry = CreatePaymentChannelLedgerObject(ACCOUNT, ACCOUNT2, 100, 200, 300, INDEX1, 400);
-    EXPECT_CALL(*backend, doFetchLedgerObject(ripple::uint256{INDEX1}, RANGEMAX, _))
+    auto const ledgerEntry = createPaymentChannelLedgerObject(kACCOUNT, kACCOUNT2, 100, 200, 300, kINDEX1, 400);
+    EXPECT_CALL(*backend_, doFetchLedgerObject(ripple::uint256{kINDEX1}, kRANGE_MAX, _))
         .WillRepeatedly(Return(ledgerEntry.getSerializer().peekData()));
 
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(fmt::format(
-            R"({{
+            R"JSON({{
                 "payment_channel": "{}"
-            }})",
-            INDEX1
+            }})JSON",
+            kINDEX1
         ));
         auto const output = handler.process(req, Context{yield});
         ASSERT_TRUE(output);
-        EXPECT_EQ(*output.result, json::parse(OUT));
+        EXPECT_EQ(*output.result, json::parse(kOUT));
+    });
+}
+
+TEST_F(RPCLedgerEntryTest, Vault_BinaryFalse)
+{
+    // return valid ledgerHeader
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, kRANGE_MAX);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kRANGE_MAX, _)).WillRepeatedly(Return(ledgerHeader));
+
+    boost::json::object entry;
+
+    auto const vault = createVault(
+        kACCOUNT,
+        kACCOUNT,
+        kRANGE_MAX,
+        "XRP",
+        ripple::toBase58(ripple::xrpAccount()),
+        ripple::uint192(0),
+        0,
+        ripple::uint256{1},
+        0
+    );
+
+    auto const vaultKey =
+        ripple::keylet::vault(ripple::parseBase58<ripple::AccountID>(kACCOUNT).value(), kRANGE_MAX).key;
+
+    ripple::STLedgerEntry const sle{
+        ripple::SerialIter{vault.getSerializer().peekData().data(), vault.getSerializer().peekData().size()}, vaultKey
+    };
+
+    EXPECT_CALL(*backend_, doFetchLedgerObject(vaultKey, testing::_, testing::_))
+        .WillOnce(Return(vault.getSerializer().peekData()));
+
+    runSpawn([&, this](auto yield) {
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
+        auto const req = json::parse(fmt::format(
+            R"JSON({{
+                "binary": false,
+                "vault": {{
+                    "owner": "{}",
+                    "seq": {}
+                }}
+            }})JSON",
+            kACCOUNT,
+            kRANGE_MAX
+        ));
+        auto const output = handler.process(req, Context{yield});
+        ASSERT_TRUE(output);
+
+        EXPECT_EQ(output.result->at("node").at("Owner").as_string(), kACCOUNT);
+        EXPECT_EQ(output.result->at("node").at("Sequence").as_int64(), kRANGE_MAX);
     });
 }
 
 TEST_F(RPCLedgerEntryTest, UnexpectedLedgerType)
 {
     // return valid ledgerHeader
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, RANGEMAX);
-    EXPECT_CALL(*backend, fetchLedgerBySequence(RANGEMAX, _)).WillRepeatedly(Return(ledgerHeader));
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, kRANGE_MAX);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kRANGE_MAX, _)).WillRepeatedly(Return(ledgerHeader));
 
     // return valid ledger entry which can be deserialized
-    auto const ledgerEntry = CreatePaymentChannelLedgerObject(ACCOUNT, ACCOUNT2, 100, 200, 300, INDEX1, 400);
-    EXPECT_CALL(*backend, doFetchLedgerObject(ripple::uint256{INDEX1}, RANGEMAX, _))
+    auto const ledgerEntry = createPaymentChannelLedgerObject(kACCOUNT, kACCOUNT2, 100, 200, 300, kINDEX1, 400);
+    EXPECT_CALL(*backend_, doFetchLedgerObject(ripple::uint256{kINDEX1}, kRANGE_MAX, _))
         .WillRepeatedly(Return(ledgerEntry.getSerializer().peekData()));
 
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(fmt::format(
-            R"({{
+            R"JSON({{
                 "check": "{}"
-            }})",
-            INDEX1
+            }})JSON",
+            kINDEX1
         ));
         auto const output = handler.process(req, Context{yield});
         ASSERT_FALSE(output);
@@ -2982,17 +3374,17 @@ TEST_F(RPCLedgerEntryTest, UnexpectedLedgerType)
 
 TEST_F(RPCLedgerEntryTest, LedgerNotExistViaIntSequence)
 {
-    EXPECT_CALL(*backend, fetchLedgerBySequence(RANGEMAX, _)).WillRepeatedly(Return(std::nullopt));
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kRANGE_MAX, _)).WillRepeatedly(Return(std::nullopt));
 
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(fmt::format(
-            R"({{
+            R"JSON({{
                 "check": "{}",
                 "ledger_index": {}
-            }})",
-            INDEX1,
-            RANGEMAX
+            }})JSON",
+            kINDEX1,
+            kRANGE_MAX
         ));
         auto const output = handler.process(req, Context{yield});
         ASSERT_FALSE(output);
@@ -3004,17 +3396,17 @@ TEST_F(RPCLedgerEntryTest, LedgerNotExistViaIntSequence)
 
 TEST_F(RPCLedgerEntryTest, LedgerNotExistViaStringSequence)
 {
-    EXPECT_CALL(*backend, fetchLedgerBySequence(RANGEMAX, _)).WillRepeatedly(Return(std::nullopt));
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kRANGE_MAX, _)).WillRepeatedly(Return(std::nullopt));
 
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(fmt::format(
-            R"({{
+            R"JSON({{
                 "check": "{}",
                 "ledger_index": "{}"
-            }})",
-            INDEX1,
-            RANGEMAX
+            }})JSON",
+            kINDEX1,
+            kRANGE_MAX
         ));
         auto const output = handler.process(req, Context{yield});
         ASSERT_FALSE(output);
@@ -3026,17 +3418,17 @@ TEST_F(RPCLedgerEntryTest, LedgerNotExistViaStringSequence)
 
 TEST_F(RPCLedgerEntryTest, LedgerNotExistViaHash)
 {
-    EXPECT_CALL(*backend, fetchLedgerByHash(ripple::uint256{LEDGERHASH}, _)).WillRepeatedly(Return(std::nullopt));
+    EXPECT_CALL(*backend_, fetchLedgerByHash(ripple::uint256{kLEDGER_HASH}, _)).WillRepeatedly(Return(std::nullopt));
 
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(fmt::format(
-            R"({{
+            R"JSON({{
                 "check": "{}",
                 "ledger_hash": "{}"
-            }})",
-            INDEX1,
-            LEDGERHASH
+            }})JSON",
+            kINDEX1,
+            kLEDGER_HASH
         ));
         auto const output = handler.process(req, Context{yield});
         ASSERT_FALSE(output);
@@ -3049,8 +3441,8 @@ TEST_F(RPCLedgerEntryTest, LedgerNotExistViaHash)
 TEST_F(RPCLedgerEntryTest, InvalidEntryTypeVersion2)
 {
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
-        auto const req = json::parse(R"({})");
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
+        auto const req = json::parse(R"JSON({})JSON");
         auto const output = handler.process(req, Context{.yield = yield, .apiVersion = 2});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
@@ -3062,8 +3454,8 @@ TEST_F(RPCLedgerEntryTest, InvalidEntryTypeVersion2)
 TEST_F(RPCLedgerEntryTest, InvalidEntryTypeVersion1)
 {
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
-        auto const req = json::parse(R"({})");
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
+        auto const req = json::parse(R"JSON({})JSON");
         auto const output = handler.process(req, Context{.yield = yield, .apiVersion = 1});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
@@ -3082,7 +3474,7 @@ TEST(RPCLedgerEntrySpecTest, DeprecatedFields)
     auto const& warning = warnings[0].as_object();
     ASSERT_TRUE(warning.contains("id"));
     ASSERT_TRUE(warning.contains("message"));
-    EXPECT_EQ(warning.at("id").as_int64(), static_cast<int64_t>(rpc::WarningCode::warnRPC_DEPRECATED));
+    EXPECT_EQ(warning.at("id").as_int64(), static_cast<int64_t>(rpc::WarningCode::WarnRpcDeprecated));
     EXPECT_NE(warning.at("message").as_string().find("Field 'ledger' is deprecated."), std::string::npos) << warning;
 }
 
@@ -3090,7 +3482,7 @@ TEST(RPCLedgerEntrySpecTest, DeprecatedFields)
 // Expected Result: same as BinaryFalse
 TEST_F(RPCLedgerEntryTest, BinaryFalseIncludeDeleted)
 {
-    static auto constexpr OUT = R"({
+    static constexpr auto kOUT = R"JSON({
         "ledger_hash": "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652",
         "ledger_index": 30,
         "validated": true,
@@ -3109,29 +3501,29 @@ TEST_F(RPCLedgerEntryTest, BinaryFalseIncludeDeleted)
             "SettleDelay": 300,
             "index": "05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD"
         }
-    })";
+    })JSON";
 
     // return valid ledgerinfo
-    auto const ledgerinfo = CreateLedgerHeader(LEDGERHASH, RANGEMAX);
-    EXPECT_CALL(*backend, fetchLedgerBySequence(RANGEMAX, _)).WillRepeatedly(Return(ledgerinfo));
+    auto const ledgerinfo = createLedgerHeader(kLEDGER_HASH, kRANGE_MAX);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kRANGE_MAX, _)).WillRepeatedly(Return(ledgerinfo));
 
     // return valid ledger entry which can be deserialized
-    auto const ledgerEntry = CreatePaymentChannelLedgerObject(ACCOUNT, ACCOUNT2, 100, 200, 300, INDEX1, 400);
-    EXPECT_CALL(*backend, doFetchLedgerObject(ripple::uint256{INDEX1}, RANGEMAX, _))
+    auto const ledgerEntry = createPaymentChannelLedgerObject(kACCOUNT, kACCOUNT2, 100, 200, 300, kINDEX1, 400);
+    EXPECT_CALL(*backend_, doFetchLedgerObject(ripple::uint256{kINDEX1}, kRANGE_MAX, _))
         .WillRepeatedly(Return(ledgerEntry.getSerializer().peekData()));
 
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(fmt::format(
-            R"({{
+            R"JSON({{
                 "index": "{}",
                 "include_deleted": true
-            }})",
-            INDEX1
+            }})JSON",
+            kINDEX1
         ));
         auto const output = handler.process(req, Context{yield});
         ASSERT_TRUE(output);
-        EXPECT_EQ(*output.result, json::parse(OUT));
+        EXPECT_EQ(*output.result, json::parse(kOUT));
     });
 }
 
@@ -3139,7 +3531,7 @@ TEST_F(RPCLedgerEntryTest, BinaryFalseIncludeDeleted)
 // Expected Result: return the latest object that is not deleted
 TEST_F(RPCLedgerEntryTest, LedgerEntryDeleted)
 {
-    static auto constexpr OUT = R"({
+    static constexpr auto kOUT = R"JSON({
         "ledger_hash": "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652",
         "ledger_index": 30,
         "validated": true,
@@ -3157,29 +3549,29 @@ TEST_F(RPCLedgerEntryTest, LedgerEntryDeleted)
             "PreviousTxnLgrSeq": 0,
             "index": "05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD"
             }
-        })";
-    auto const ledgerinfo = CreateLedgerHeader(LEDGERHASH, RANGEMAX);
-    EXPECT_CALL(*backend, fetchLedgerBySequence(RANGEMAX, _)).WillRepeatedly(Return(ledgerinfo));
+        })JSON";
+    auto const ledgerinfo = createLedgerHeader(kLEDGER_HASH, kRANGE_MAX);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kRANGE_MAX, _)).WillRepeatedly(Return(ledgerinfo));
     // return valid ledger entry which can be deserialized
-    auto const offer = CreateNFTBuyOffer(NFTID, ACCOUNT);
-    EXPECT_CALL(*backend, doFetchLedgerObject(ripple::uint256{INDEX1}, RANGEMAX, _))
+    auto const offer = createNftBuyOffer(kNFT_ID, kACCOUNT);
+    EXPECT_CALL(*backend_, doFetchLedgerObject(ripple::uint256{kINDEX1}, kRANGE_MAX, _))
         .WillOnce(Return(std::optional<Blob>{}));
-    EXPECT_CALL(*backend, doFetchLedgerObjectSeq(ripple::uint256{INDEX1}, RANGEMAX, _))
-        .WillOnce(Return(uint32_t{RANGEMAX}));
-    EXPECT_CALL(*backend, doFetchLedgerObject(ripple::uint256{INDEX1}, RANGEMAX - 1, _))
+    EXPECT_CALL(*backend_, doFetchLedgerObjectSeq(ripple::uint256{kINDEX1}, kRANGE_MAX, _))
+        .WillOnce(Return(uint32_t{kRANGE_MAX}));
+    EXPECT_CALL(*backend_, doFetchLedgerObject(ripple::uint256{kINDEX1}, kRANGE_MAX - 1, _))
         .WillOnce(Return(offer.getSerializer().peekData()));
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(fmt::format(
-            R"({{
+            R"JSON({{
                 "index": "{}",
                 "include_deleted": true
-            }})",
-            INDEX1
+            }})JSON",
+            kINDEX1
         ));
         auto const output = handler.process(req, Context{yield});
         ASSERT_TRUE(output);
-        EXPECT_EQ(*output.result, json::parse(OUT));
+        EXPECT_EQ(*output.result, json::parse(kOUT));
     });
 }
 
@@ -3187,23 +3579,23 @@ TEST_F(RPCLedgerEntryTest, LedgerEntryDeleted)
 // Expected Result: return entryNotFound error
 TEST_F(RPCLedgerEntryTest, LedgerEntryNotExist)
 {
-    auto const ledgerinfo = CreateLedgerHeader(LEDGERHASH, RANGEMAX);
-    EXPECT_CALL(*backend, fetchLedgerBySequence(RANGEMAX, _)).WillRepeatedly(Return(ledgerinfo));
-    EXPECT_CALL(*backend, doFetchLedgerObject(ripple::uint256{INDEX1}, RANGEMAX, _))
+    auto const ledgerinfo = createLedgerHeader(kLEDGER_HASH, kRANGE_MAX);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kRANGE_MAX, _)).WillRepeatedly(Return(ledgerinfo));
+    EXPECT_CALL(*backend_, doFetchLedgerObject(ripple::uint256{kINDEX1}, kRANGE_MAX, _))
         .WillOnce(Return(std::optional<Blob>{}));
-    EXPECT_CALL(*backend, doFetchLedgerObjectSeq(ripple::uint256{INDEX1}, RANGEMAX, _))
-        .WillOnce(Return(uint32_t{RANGEMAX}));
-    EXPECT_CALL(*backend, doFetchLedgerObject(ripple::uint256{INDEX1}, RANGEMAX - 1, _))
+    EXPECT_CALL(*backend_, doFetchLedgerObjectSeq(ripple::uint256{kINDEX1}, kRANGE_MAX, _))
+        .WillOnce(Return(uint32_t{kRANGE_MAX}));
+    EXPECT_CALL(*backend_, doFetchLedgerObject(ripple::uint256{kINDEX1}, kRANGE_MAX - 1, _))
         .WillOnce(Return(std::optional<Blob>{}));
 
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(fmt::format(
-            R"({{
+            R"JSON({{
                 "index": "{}",
                 "include_deleted": true
-            }})",
-            INDEX1
+            }})JSON",
+            kINDEX1
         ));
         auto const output = handler.process(req, Context{yield});
         ASSERT_FALSE(output);
@@ -3217,7 +3609,7 @@ TEST_F(RPCLedgerEntryTest, LedgerEntryNotExist)
 // Expected Result: same as BinaryFalse
 TEST_F(RPCLedgerEntryTest, BinaryFalseIncludeDeleteFalse)
 {
-    static auto constexpr OUT = R"({
+    static constexpr auto kOUT = R"JSON({
         "ledger_hash": "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652",
         "ledger_index": 30,
         "validated": true,
@@ -3236,29 +3628,29 @@ TEST_F(RPCLedgerEntryTest, BinaryFalseIncludeDeleteFalse)
             "SettleDelay": 300,
             "index": "05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD"
         }
-    })";
+    })JSON";
 
     // return valid ledgerinfo
-    auto const ledgerinfo = CreateLedgerHeader(LEDGERHASH, RANGEMAX);
-    EXPECT_CALL(*backend, fetchLedgerBySequence(RANGEMAX, _)).WillRepeatedly(Return(ledgerinfo));
+    auto const ledgerinfo = createLedgerHeader(kLEDGER_HASH, kRANGE_MAX);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kRANGE_MAX, _)).WillRepeatedly(Return(ledgerinfo));
 
     // return valid ledger entry which can be deserialized
-    auto const ledgerEntry = CreatePaymentChannelLedgerObject(ACCOUNT, ACCOUNT2, 100, 200, 300, INDEX1, 400);
-    EXPECT_CALL(*backend, doFetchLedgerObject(ripple::uint256{INDEX1}, RANGEMAX, _))
+    auto const ledgerEntry = createPaymentChannelLedgerObject(kACCOUNT, kACCOUNT2, 100, 200, 300, kINDEX1, 400);
+    EXPECT_CALL(*backend_, doFetchLedgerObject(ripple::uint256{kINDEX1}, kRANGE_MAX, _))
         .WillRepeatedly(Return(ledgerEntry.getSerializer().peekData()));
 
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(fmt::format(
-            R"({{
+            R"JSON({{
                 "payment_channel": "{}",
                 "include_deleted": false
-            }})",
-            INDEX1
+            }})JSON",
+            kINDEX1
         ));
         auto const output = handler.process(req, Context{yield});
         ASSERT_TRUE(output);
-        EXPECT_EQ(*output.result, json::parse(OUT));
+        EXPECT_EQ(*output.result, json::parse(kOUT));
     });
 }
 
@@ -3266,7 +3658,7 @@ TEST_F(RPCLedgerEntryTest, BinaryFalseIncludeDeleteFalse)
 // Expected Result: return the latest object that is not deleted (latest object in this test)
 TEST_F(RPCLedgerEntryTest, ObjectUpdateIncludeDelete)
 {
-    static auto constexpr OUT = R"({
+    static constexpr auto kOUT = R"JSON({
         "ledger_hash": "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652",
         "ledger_index": 30,
         "validated": true,
@@ -3293,32 +3685,32 @@ TEST_F(RPCLedgerEntryTest, ObjectUpdateIncludeDelete)
             "PreviousTxnLgrSeq": 123,
             "index": "05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD"
             }
-        })";
+        })JSON";
 
     // return valid ledgerinfo
-    auto const ledgerinfo = CreateLedgerHeader(LEDGERHASH, RANGEMAX);
-    EXPECT_CALL(*backend, fetchLedgerBySequence(RANGEMAX, _)).WillRepeatedly(Return(ledgerinfo));
+    auto const ledgerinfo = createLedgerHeader(kLEDGER_HASH, kRANGE_MAX);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kRANGE_MAX, _)).WillRepeatedly(Return(ledgerinfo));
 
     // return valid ledger entry which can be deserialized
-    auto const line1 = CreateRippleStateLedgerObject("USD", ACCOUNT2, 10, ACCOUNT, 100, ACCOUNT2, 200, TXNID, 123);
-    auto const line2 = CreateRippleStateLedgerObject("USD", ACCOUNT, 10, ACCOUNT2, 100, ACCOUNT, 200, TXNID, 123);
-    EXPECT_CALL(*backend, doFetchLedgerObject(ripple::uint256{INDEX1}, RANGEMAX, _))
+    auto const line1 = createRippleStateLedgerObject("USD", kACCOUNT2, 10, kACCOUNT, 100, kACCOUNT2, 200, kTXN_ID, 123);
+    auto const line2 = createRippleStateLedgerObject("USD", kACCOUNT, 10, kACCOUNT2, 100, kACCOUNT, 200, kTXN_ID, 123);
+    EXPECT_CALL(*backend_, doFetchLedgerObject(ripple::uint256{kINDEX1}, kRANGE_MAX, _))
         .WillRepeatedly(Return(line1.getSerializer().peekData()));
-    EXPECT_CALL(*backend, doFetchLedgerObject(ripple::uint256{INDEX1}, RANGEMAX - 1, _))
+    EXPECT_CALL(*backend_, doFetchLedgerObject(ripple::uint256{kINDEX1}, kRANGE_MAX - 1, _))
         .WillRepeatedly(Return(line2.getSerializer().peekData()));
 
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(fmt::format(
-            R"({{
+            R"JSON({{
                 "index": "{}",
                 "include_deleted": true
-            }})",
-            INDEX1
+            }})JSON",
+            kINDEX1
         ));
         auto const output = handler.process(req, Context{yield});
         ASSERT_TRUE(output);
-        EXPECT_EQ(*output.result, json::parse(OUT));
+        EXPECT_EQ(*output.result, json::parse(kOUT));
     });
 }
 
@@ -3326,7 +3718,7 @@ TEST_F(RPCLedgerEntryTest, ObjectUpdateIncludeDelete)
 // Expected Result: return the latest object that is not deleted
 TEST_F(RPCLedgerEntryTest, ObjectDeletedPreviously)
 {
-    static auto constexpr OUT = R"({
+    static constexpr auto kOUT = R"JSON({
         "ledger_hash": "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652",
         "ledger_index": 30,
         "validated": true,
@@ -3344,29 +3736,29 @@ TEST_F(RPCLedgerEntryTest, ObjectDeletedPreviously)
             "PreviousTxnLgrSeq": 0,
             "index": "05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD"
             }
-        })";
-    auto const ledgerinfo = CreateLedgerHeader(LEDGERHASH, RANGEMAX);
-    EXPECT_CALL(*backend, fetchLedgerBySequence(RANGEMAX, _)).WillRepeatedly(Return(ledgerinfo));
+        })JSON";
+    auto const ledgerinfo = createLedgerHeader(kLEDGER_HASH, kRANGE_MAX);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kRANGE_MAX, _)).WillRepeatedly(Return(ledgerinfo));
     // return valid ledger entry which can be deserialized
-    auto const offer = CreateNFTBuyOffer(NFTID, ACCOUNT);
-    EXPECT_CALL(*backend, doFetchLedgerObject(ripple::uint256{INDEX1}, RANGEMAX, _))
+    auto const offer = createNftBuyOffer(kNFT_ID, kACCOUNT);
+    EXPECT_CALL(*backend_, doFetchLedgerObject(ripple::uint256{kINDEX1}, kRANGE_MAX, _))
         .WillOnce(Return(std::optional<Blob>{}));
-    EXPECT_CALL(*backend, doFetchLedgerObjectSeq(ripple::uint256{INDEX1}, RANGEMAX, _))
-        .WillOnce(Return(uint32_t{RANGEMAX - 4}));
-    EXPECT_CALL(*backend, doFetchLedgerObject(ripple::uint256{INDEX1}, RANGEMAX - 5, _))
+    EXPECT_CALL(*backend_, doFetchLedgerObjectSeq(ripple::uint256{kINDEX1}, kRANGE_MAX, _))
+        .WillOnce(Return(uint32_t{kRANGE_MAX - 4}));
+    EXPECT_CALL(*backend_, doFetchLedgerObject(ripple::uint256{kINDEX1}, kRANGE_MAX - 5, _))
         .WillOnce(Return(offer.getSerializer().peekData()));
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(fmt::format(
-            R"({{
+            R"JSON({{
                 "index": "{}",
                 "include_deleted": true
-            }})",
-            INDEX1
+            }})JSON",
+            kINDEX1
         ));
         auto const output = handler.process(req, Context{yield});
         ASSERT_TRUE(output);
-        EXPECT_EQ(*output.result, json::parse(OUT));
+        EXPECT_EQ(*output.result, json::parse(kOUT));
     });
 }
 
@@ -3374,20 +3766,21 @@ TEST_F(RPCLedgerEntryTest, ObjectDeletedPreviously)
 // Expected Result: return entryNotFound error
 TEST_F(RPCLedgerEntryTest, ObjectSeqNotExist)
 {
-    auto const ledgerinfo = CreateLedgerHeader(LEDGERHASH, RANGEMAX);
-    EXPECT_CALL(*backend, fetchLedgerBySequence(RANGEMAX, _)).WillRepeatedly(Return(ledgerinfo));
-    EXPECT_CALL(*backend, doFetchLedgerObject(ripple::uint256{INDEX1}, RANGEMAX, _))
+    auto const ledgerinfo = createLedgerHeader(kLEDGER_HASH, kRANGE_MAX);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kRANGE_MAX, _)).WillRepeatedly(Return(ledgerinfo));
+    EXPECT_CALL(*backend_, doFetchLedgerObject(ripple::uint256{kINDEX1}, kRANGE_MAX, _))
         .WillOnce(Return(std::optional<Blob>{}));
-    EXPECT_CALL(*backend, doFetchLedgerObjectSeq(ripple::uint256{INDEX1}, RANGEMAX, _)).WillOnce(Return(std::nullopt));
+    EXPECT_CALL(*backend_, doFetchLedgerObjectSeq(ripple::uint256{kINDEX1}, kRANGE_MAX, _))
+        .WillOnce(Return(std::nullopt));
 
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(fmt::format(
-            R"({{
+            R"JSON({{
                 "index": "{}",
                 "include_deleted": true
-            }})",
-            INDEX1
+            }})JSON",
+            kINDEX1
         ));
         auto const output = handler.process(req, Context{yield});
         ASSERT_FALSE(output);
@@ -3400,48 +3793,48 @@ TEST_F(RPCLedgerEntryTest, ObjectSeqNotExist)
 // this testcase will test the if response includes synthetic mpt_issuance_id
 TEST_F(RPCLedgerEntryTest, SyntheticMPTIssuanceID)
 {
-    static auto constexpr OUT = R"({
-        "ledger_hash":"4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652",
-        "ledger_index":30,
-        "validated":true,
-        "index":"FD7E7EFAE2A20E75850D0E0590B205E2F74DC472281768CD6E03988069816336",
-        "node":{
-            "Flags":0,
-            "Issuer":"rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
-            "LedgerEntryType":"MPTokenIssuance",
-            "MPTokenMetadata":"6D65746164617461",
-            "MaximumAmount":"0",
-            "OutstandingAmount":"0",
-            "OwnerNode":"0",
-            "PreviousTxnID":"0000000000000000000000000000000000000000000000000000000000000000",
-            "PreviousTxnLgrSeq":0,
-            "Sequence":2,
-            "index":"FD7E7EFAE2A20E75850D0E0590B205E2F74DC472281768CD6E03988069816336",
-            "mpt_issuance_id":"000000024B4E9C06F24296074F7BC48F92A97916C6DC5EA9"
+    static constexpr auto kOUT = R"JSON({
+        "ledger_hash": "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652",
+        "ledger_index": 30,
+        "validated": true,
+        "index": "FD7E7EFAE2A20E75850D0E0590B205E2F74DC472281768CD6E03988069816336",
+        "node": {
+            "Flags": 0,
+            "Issuer": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn",
+            "LedgerEntryType": "MPTokenIssuance",
+            "MPTokenMetadata": "6D65746164617461",
+            "MaximumAmount": "0",
+            "OutstandingAmount": "0",
+            "OwnerNode": "0",
+            "PreviousTxnID": "0000000000000000000000000000000000000000000000000000000000000000",
+            "PreviousTxnLgrSeq": 0,
+            "Sequence": 2,
+            "index": "FD7E7EFAE2A20E75850D0E0590B205E2F74DC472281768CD6E03988069816336",
+            "mpt_issuance_id": "000000024B4E9C06F24296074F7BC48F92A97916C6DC5EA9"
         }
-    })";
+    })JSON";
 
-    auto const mptId = ripple::makeMptID(2, GetAccountIDWithString(ACCOUNT));
+    auto const mptId = ripple::makeMptID(2, getAccountIdWithString(kACCOUNT));
 
     // return valid ledgerHeader
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, RANGEMAX);
-    EXPECT_CALL(*backend, fetchLedgerBySequence(RANGEMAX, _)).WillRepeatedly(Return(ledgerHeader));
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, kRANGE_MAX);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kRANGE_MAX, _)).WillRepeatedly(Return(ledgerHeader));
 
     // return valid ledger entry which can be deserialized
-    auto const ledgerEntry = CreateMPTIssuanceObject(ACCOUNT, 2, "metadata");
-    EXPECT_CALL(*backend, doFetchLedgerObject(ripple::keylet::mptIssuance(mptId).key, RANGEMAX, _))
+    auto const ledgerEntry = createMptIssuanceObject(kACCOUNT, 2, "metadata");
+    EXPECT_CALL(*backend_, doFetchLedgerObject(ripple::keylet::mptIssuance(mptId).key, kRANGE_MAX, _))
         .WillRepeatedly(Return(ledgerEntry.getSerializer().peekData()));
 
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{LedgerEntryHandler{backend}};
+        auto const handler = AnyHandler{LedgerEntryHandler{backend_}};
         auto const req = json::parse(fmt::format(
-            R"({{
+            R"JSON({{
                 "mpt_issuance": "{}"
-            }})",
+            }})JSON",
             ripple::to_string(mptId)
         ));
         auto const output = handler.process(req, Context{yield});
         ASSERT_TRUE(output);
-        EXPECT_EQ(*output.result, json::parse(OUT));
+        EXPECT_EQ(*output.result, json::parse(kOUT));
     });
 }

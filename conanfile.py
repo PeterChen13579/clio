@@ -1,16 +1,16 @@
 from conan import ConanFile
 from conan.tools.cmake import CMake, CMakeToolchain, cmake_layout
 
-class Clio(ConanFile):
+
+class ClioConan(ConanFile):
     name = 'clio'
     license = 'ISC'
-    author = 'Alex Kremer <akremer@ripple.com>, John Freeman <jfreeman@ripple.com>'
+    author = 'Alex Kremer <akremer@ripple.com>, John Freeman <jfreeman@ripple.com>, Ayaz Salikhov <asalikhov@ripple.com>'
     url = 'https://github.com/xrplf/clio'
     description = 'Clio RPC server'
     settings = 'os', 'compiler', 'build_type', 'arch'
     options = {
         'static': [True, False],              # static linkage
-        'fPIC': [True, False],                # unused?
         'verbose': [True, False],
         'tests': [True, False],               # build unit tests; create `clio_tests` binary
         'integration_tests': [True, False],   # build integration tests; create `clio_integration_tests` binary
@@ -19,14 +19,18 @@ class Clio(ConanFile):
         'packaging': [True, False],           # create distribution packages
         'coverage': [True, False],            # build for test coverage report; create custom target `clio_tests-ccov`
         'lint': [True, False],                # run clang-tidy checks during compilation
+        'snapshot': [True, False],            # build export/import snapshot tool
+        'time_trace': [True, False]           # build using -ftime-trace to create compiler trace reports
     }
 
     requires = [
-        'boost/1.82.0',
+        'boost/1.83.0',
         'cassandra-cpp-driver/2.17.0',
         'fmt/10.1.1',
-        'protobuf/3.21.9',
+        'protobuf/3.21.12',
         'grpc/1.50.1',
+        'openssl/1.1.1v',
+        'xrpl/2.5.0',
         'zlib/1.3.1',
         'openssl/1.1.1u',
         'xrpl/2.4.0-b1@clio/permission_domains',
@@ -35,7 +39,6 @@ class Clio(ConanFile):
 
     default_options = {
         'static': False,
-        'fPIC': True,
         'verbose': False,
         'tests': False,
         'integration_tests': False,
@@ -44,7 +47,9 @@ class Clio(ConanFile):
         'coverage': False,
         'lint': False,
         'docs': False,
-        
+        'snapshot': False,
+        'time_trace': False,
+
         'xrpl/*:tests': False,
         'xrpl/*:rocksdb': False,
         'cassandra-cpp-driver/*:shared': False,
@@ -76,22 +81,16 @@ class Clio(ConanFile):
 
     def layout(self):
         cmake_layout(self)
-        # Fix this setting to follow the default introduced in Conan 1.48 
+        # Fix this setting to follow the default introduced in Conan 1.48
         # to align with our build instructions.
         self.folders.generators = 'build/generators'
 
     generators = 'CMakeDeps'
+
     def generate(self):
         tc = CMakeToolchain(self)
-        tc.variables['verbose'] = self.options.verbose
-        tc.variables['static'] = self.options.static
-        tc.variables['tests'] = self.options.tests
-        tc.variables['integration_tests'] = self.options.integration_tests
-        tc.variables['coverage'] = self.options.coverage
-        tc.variables['lint'] = self.options.lint
-        tc.variables['docs'] = self.options.docs
-        tc.variables['packaging'] = self.options.packaging
-        tc.variables['benchmark'] = self.options.benchmark
+        for option_name, option_value in self.options.items():
+            tc.variables[option_name] = option_value
         tc.generate()
 
     def build(self):

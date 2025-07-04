@@ -43,7 +43,6 @@
 #include <optional>
 #include <string>
 #include <utility>
-#include <variant>
 #include <vector>
 
 namespace rpc {
@@ -86,6 +85,9 @@ AccountLinesHandler::addLine(
     bool const lineNoRipplePeer = (flags & (not viewLowest ? ripple::lsfLowNoRipple : ripple::lsfHighNoRipple)) != 0u;
     bool const lineFreeze = (flags & (viewLowest ? ripple::lsfLowFreeze : ripple::lsfHighFreeze)) != 0u;
     bool const lineFreezePeer = (flags & (not viewLowest ? ripple::lsfLowFreeze : ripple::lsfHighFreeze)) != 0u;
+    bool const lineDeepFreeze = (flags & (viewLowest ? ripple::lsfLowDeepFreeze : ripple::lsfHighDeepFreeze)) != 0u;
+    bool const lineDeepFreezePeer =
+        (flags & (not viewLowest ? ripple::lsfLowDeepFreeze : ripple::lsfHighDeepFreeze)) != 0u;
 
     ripple::STAmount const& saBalance = balance;
     ripple::STAmount const& saLimit = lineLimit;
@@ -100,6 +102,12 @@ AccountLinesHandler::addLine(
     line.qualityIn = lineQualityIn;
     line.qualityOut = lineQualityOut;
 
+    if (lineNoRipple)
+        line.noRipple = true;
+
+    if (lineNoRipplePeer)
+        line.noRipplePeer = true;
+
     if (lineAuth)
         line.authorized = true;
 
@@ -112,8 +120,12 @@ AccountLinesHandler::addLine(
     if (lineFreezePeer)
         line.freezePeer = true;
 
-    line.noRipple = lineNoRipple;
-    line.noRipplePeer = lineNoRipplePeer;
+    if (lineDeepFreeze)
+        line.deepFreeze = true;
+
+    if (lineDeepFreezePeer)
+        line.deepFreezePeer = true;
+
     lines.push_back(line);
 }
 
@@ -122,14 +134,14 @@ AccountLinesHandler::process(AccountLinesHandler::Input input, Context const& ct
 {
     auto const range = sharedPtrBackend_->fetchLedgerRange();
     ASSERT(range.has_value(), "AccountLines' ledger range must be available");
-    auto const lgrInfoOrStatus = getLedgerHeaderFromHashOrSeq(
+    auto const expectedLgrInfo = getLedgerHeaderFromHashOrSeq(
         *sharedPtrBackend_, ctx.yield, input.ledgerHash, input.ledgerIndex, range->maxSequence
     );
 
-    if (auto status = std::get_if<Status>(&lgrInfoOrStatus))
-        return Error{*status};
+    if (!expectedLgrInfo.has_value())
+        return Error{expectedLgrInfo.error()};
 
-    auto const lgrInfo = std::get<ripple::LedgerHeader>(lgrInfoOrStatus);
+    auto const& lgrInfo = expectedLgrInfo.value();
     auto const accountID = accountFromStringStrict(input.account);
     auto const accountLedgerObject =
         sharedPtrBackend_->fetchLedgerObject(ripple::keylet::account(*accountID).key, lgrInfo.seq, ctx.yield);
@@ -158,14 +170,14 @@ AccountLinesHandler::process(AccountLinesHandler::Input input, Context const& ct
         }
     };
 
-    auto const next = traverseOwnedNodes(
+    auto const expectedNext = traverseOwnedNodes(
         *sharedPtrBackend_, *accountID, lgrInfo.seq, input.limit, input.marker, ctx.yield, addToResponse
     );
 
-    if (auto status = std::get_if<Status>(&next))
-        return Error{*status};
+    if (!expectedNext.has_value())
+        return Error{expectedNext.error()};
 
-    auto const nextMarker = std::get<AccountCursor>(next);
+    auto const nextMarker = expectedNext.value();
 
     response.account = input.account;
     response.limit = input.limit;  // not documented,
@@ -249,8 +261,11 @@ tag_invoke(
         {JS(quality_out), line.qualityOut},
     };
 
-    obj[JS(no_ripple)] = line.noRipple;
-    obj[JS(no_ripple_peer)] = line.noRipplePeer;
+    if (line.noRipple)
+        obj[JS(no_ripple)] = *(line.noRipple);
+
+    if (line.noRipplePeer)
+        obj[JS(no_ripple_peer)] = *(line.noRipplePeer);
 
     if (line.authorized)
         obj[JS(authorized)] = *(line.authorized);
@@ -263,6 +278,12 @@ tag_invoke(
 
     if (line.freezePeer)
         obj[JS(freeze_peer)] = *(line.freezePeer);
+
+    if (line.deepFreeze)
+        obj[JS(deep_freeze)] = *(line.deepFreeze);
+
+    if (line.deepFreezePeer)
+        obj[JS(deep_freeze_peer)] = *(line.deepFreezePeer);
 
     jv = std::move(obj);
 }

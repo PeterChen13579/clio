@@ -21,9 +21,9 @@
 
 #include "util/Assert.hpp"
 #include "util/Concepts.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
-#include "util/newconfig/ConfigValue.hpp"
-#include "util/newconfig/Types.hpp"
+#include "util/config/ConfigDefinition.hpp"
+#include "util/config/ConfigValue.hpp"
+#include "util/config/Types.hpp"
 #include "util/prometheus/Bool.hpp"
 #include "util/prometheus/Counter.hpp"
 #include "util/prometheus/Gauge.hpp"
@@ -158,9 +158,9 @@ struct MockPrometheusImpl : PrometheusInterface {
     {
         std::unique_ptr<MetricBase> metric;
         auto const key = name + labelsString;
-        if constexpr (std::is_same_v<MetricType, GaugeInt>) {
+        if constexpr (std::is_same_v<MetricType, GaugeInt> or std::is_same_v<MetricType, Bool>) {
             auto& impl = counterIntImpls[key];
-            metric = std::make_unique<MetricType>(name, labelsString, impl);
+            metric = std::make_unique<GaugeInt>(name, labelsString, impl);
         } else if constexpr (std::is_same_v<MetricType, CounterInt>) {
             auto& impl = counterUintImpls[key];
             metric = std::make_unique<MetricType>(name, labelsString, impl);
@@ -235,7 +235,7 @@ struct WithMockPrometheus : virtual ::testing::Test {
         if (!mockPrometheusPtr->metrics.contains(key))
             mockPrometheusPtr->makeMetric<MetricType>(std::move(name), std::move(labelsString));
 
-        if constexpr (std::is_same_v<MetricType, GaugeInt>) {
+        if constexpr (std::is_same_v<MetricType, GaugeInt> or std::is_same_v<MetricType, Bool>) {
             return mockPrometheusPtr->counterIntImpls[key];
         } else if constexpr (std::is_same_v<MetricType, CounterInt>) {
             return mockPrometheusPtr->counterUintImpls[key];

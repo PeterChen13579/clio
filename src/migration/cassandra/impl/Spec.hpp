@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of clio: https://github.com/XRPLF/clio
-    Copyright (c) 2022-2024, the clio developers.
+    Copyright (c) 2024, the clio developers.
 
     Permission to use, copy, modify, and distribute this software for any
     purpose with or without fee is hereby granted, provided that the above
@@ -30,12 +30,12 @@ namespace migration::cassandra::impl {
 template <typename T>
 concept TableSpec = requires {
     // Check that 'row' exists and is a tuple
-    // keys types are at the begining and the other fields types sort in alphabetical order
+    // keys types are at the beginning and the other fields types sort in alphabetical order
     typename T::Row;
     requires std::tuple_size<typename T::Row>::value >= 0;  // Ensures 'row' is a tuple
 
     // Check that static constexpr members 'partitionKey' and 'tableName' exist
-    { T::PARTITION_KEY } -> std::convertible_to<char const*>;
-    { T::TABLE_NAME } -> std::convertible_to<char const*>;
+    { T::kPARTITION_KEY } -> std::convertible_to<char const*>;
+    { T::kTABLE_NAME } -> std::convertible_to<char const*>;
 };
 }  // namespace migration::cassandra::impl

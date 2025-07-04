@@ -19,18 +19,20 @@
 
 #pragma once
 
+#include "util/Mutex.hpp"
+#include "util/config/ConfigDefinition.hpp"
 #include "util/log/Logger.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
 #include "web/dosguard/DOSGuardInterface.hpp"
+#include "web/dosguard/WeightsInterface.hpp"
 #include "web/dosguard/WhitelistHandlerInterface.hpp"
 
 #include <boost/asio.hpp>
 #include <boost/iterator/transform_iterator.hpp>
+#include <boost/json/object.hpp>
 #include <boost/system/error_code.hpp>
 
 #include <cstdint>
 #include <functional>
-#include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -48,14 +50,18 @@ class DOSGuard : public DOSGuardInterface {
      * @brief Accumulated state per IP, state will be reset accordingly
      */
     struct ClientState {
-        std::uint32_t transferedByte = 0; /**< Accumulated transferred byte */
-        std::uint32_t requestsCount = 0;  /**< Accumulated served requests count */
+        std::uint32_t transferredByte = 0; /**< Accumulated transferred byte */
+        std::uint32_t requestsCount = 0;   /**< Accumulated served requests count */
     };
 
-    mutable std::mutex mtx_;
-    std::unordered_map<std::string, ClientState> ipState_;
-    std::unordered_map<std::string, std::uint32_t> ipConnCount_;
+    struct State {
+        std::unordered_map<std::string, ClientState> ipState;
+        std::unordered_map<std::string, std::uint32_t> ipConnCount;
+    };
+    util::Mutex<State> mtx_;
+
     std::reference_wrapper<WhitelistHandlerInterface const> whitelistHandler_;
+    std::reference_wrapper<WeightsInterface const> weights_;
 
     std::uint32_t const maxFetches_;
     std::uint32_t const maxConnCount_;
@@ -68,8 +74,13 @@ public:
      *
      * @param config Clio config
      * @param whitelistHandler Whitelist handler that checks whitelist for IP addresses
+     * @param weights API methods weights
      */
-    DOSGuard(util::config::ClioConfigDefinition const& config, WhitelistHandlerInterface const& whitelistHandler);
+    DOSGuard(
+        util::config::ClioConfigDefinition const& config,
+        WhitelistHandlerInterface const& whitelistHandler,
+        WeightsInterface const& weights
+    );
 
     /**
      * @brief Check whether an ip address is in the whitelist or not.
@@ -130,11 +141,12 @@ public:
      * returned otherwise.
      *
      * @param ip
+     * @param request The request as json object
      * @return true
      * @return false
      */
     [[maybe_unused]] bool
-    request(std::string const& ip) noexcept override;
+    request(std::string const& ip, boost::json::object const& request) override;
 
     /**
      * @brief Instantly clears all fetch counters added by @see add(std::string const&, uint32_t).

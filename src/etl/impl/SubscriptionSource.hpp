@@ -24,6 +24,7 @@
 #include "feed/SubscriptionManagerInterface.hpp"
 #include "util/Mutex.hpp"
 #include "util/Retry.hpp"
+#include "util/StopHelper.hpp"
 #include "util/log/Logger.hpp"
 #include "util/prometheus/Gauge.hpp"
 #include "util/requests/Types.hpp"
@@ -39,7 +40,6 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
-#include <future>
 #include <memory>
 #include <optional>
 #include <string>
@@ -50,6 +50,7 @@ namespace etl::impl {
 
 /**
  * @brief This class is used to subscribe to a source of ledger data and forward it to the subscription manager.
+ * @note This class is safe to delete only if io_context is stopped.
  */
 class SubscriptionSource {
 public:
@@ -89,11 +90,11 @@ private:
 
     std::reference_wrapper<util::prometheus::GaugeInt> lastMessageTimeSecondsSinceEpoch_;
 
-    std::future<void> runFuture_;
+    util::StopHelper stopHelper_;
 
-    static constexpr std::chrono::seconds WS_TIMEOUT{30};
-    static constexpr std::chrono::seconds RETRY_MAX_DELAY{30};
-    static constexpr std::chrono::seconds RETRY_DELAY{1};
+    static constexpr std::chrono::seconds kWS_TIMEOUT{30};
+    static constexpr std::chrono::seconds kRETRY_MAX_DELAY{30};
+    static constexpr std::chrono::seconds kRETRY_DELAY{1};
 
 public:
     /**
@@ -107,8 +108,7 @@ public:
      * @param subscriptions The subscription manager object
      * @param onConnect The onConnect hook. Called when the connection is established
      * @param onDisconnect The onDisconnect hook. Called when the connection is lost
-     * @param onLedgerClosed The onLedgerClosed hook. Called when the ledger is closed but only if the source is
-     * forwarding
+     * @param onLedgerClosed The onLedgerClosed hook. Called when the ledger is closed if the source is forwarding
      * @param wsTimeout A timeout for websocket operations. Defaults to 30 seconds
      * @param retryDelay The retry delay. Defaults to 1 second
      */
@@ -121,16 +121,9 @@ public:
         OnConnectHook onConnect,
         OnDisconnectHook onDisconnect,
         OnLedgerClosedHook onLedgerClosed,
-        std::chrono::steady_clock::duration const wsTimeout = WS_TIMEOUT,
-        std::chrono::steady_clock::duration const retryDelay = RETRY_DELAY
+        std::chrono::steady_clock::duration const wsTimeout = SubscriptionSource::kWS_TIMEOUT,
+        std::chrono::steady_clock::duration const retryDelay = SubscriptionSource::kRETRY_DELAY
     );
-
-    /**
-     * @brief Destroy the Subscription Source object
-     *
-     * @note This will block to wait for all the async operations to complete. io_context must be still running
-     */
-    ~SubscriptionSource();
 
     /**
      * @brief Run the source
@@ -193,7 +186,7 @@ public:
      * @brief Stop the source. The source will complete already scheduled operations but will not schedule new ones
      */
     void
-    stop();
+    stop(boost::asio::yield_context yield);
 
 private:
     void

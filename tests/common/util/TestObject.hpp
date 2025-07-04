@@ -46,37 +46,37 @@
  * Create AccountID object with string
  */
 [[nodiscard]] ripple::AccountID
-GetAccountIDWithString(std::string_view id);
+getAccountIdWithString(std::string_view id);
 
 /**
  * Create AccountID object with string and return its key
  */
 [[nodiscard]] ripple::uint256
-GetAccountKey(std::string_view id);
+getAccountKey(std::string_view id);
 
 /*
  * Gets the account key from an account id
  */
 [[nodiscard]] ripple::uint256
-GetAccountKey(ripple::AccountID const& acc);
+getAccountKey(ripple::AccountID const& acc);
 
 /*
  * Create a simple ledgerHeader object with only hash and seq
  */
 [[nodiscard]] ripple::LedgerHeader
-CreateLedgerHeader(std::string_view ledgerHash, ripple::LedgerIndex seq, std::optional<uint32_t> age = std::nullopt);
+createLedgerHeader(std::string_view ledgerHash, ripple::LedgerIndex seq, std::optional<uint32_t> age = std::nullopt);
 
 /*
  * Create a simple ledgerHeader object with hash, seq and unix timestamp
  */
 [[nodiscard]] ripple::LedgerHeader
-CreateLedgerHeaderWithUnixTime(std::string_view ledgerHash, ripple::LedgerIndex seq, uint64_t closeTimeUnixStamp);
+createLedgerHeaderWithUnixTime(std::string_view ledgerHash, ripple::LedgerIndex seq, uint64_t closeTimeUnixStamp);
 
 /*
  * Create a Legacy (pre XRPFees amendment) FeeSetting ledger object
  */
 [[nodiscard]] ripple::STObject
-CreateLegacyFeeSettingLedgerObject(
+createLegacyFeeSettingLedgerObject(
     uint64_t base,
     uint32_t reserveInc,
     uint32_t reserveBase,
@@ -88,7 +88,7 @@ CreateLegacyFeeSettingLedgerObject(
  * Create a FeeSetting ledger object
  */
 ripple::STObject
-CreateFeeSettingLedgerObject(
+createFeeSettingLedgerObject(
     ripple::STAmount base,
     ripple::STAmount reserveInc,
     ripple::STAmount reserveBase,
@@ -99,7 +99,7 @@ CreateFeeSettingLedgerObject(
  * Create a Legacy (pre XRPFees amendment) FeeSetting ledger object and return its blob
  */
 [[nodiscard]] ripple::Blob
-CreateLegacyFeeSettingBlob(
+createLegacyFeeSettingBlob(
     uint64_t base,
     uint32_t reserveInc,
     uint32_t reserveBase,
@@ -111,13 +111,13 @@ CreateLegacyFeeSettingBlob(
  * Create a FeeSetting ledger object and return its blob
  */
 ripple::Blob
-CreateFeeSettingBlob(ripple::STAmount base, ripple::STAmount reserveInc, ripple::STAmount reserveBase, uint32_t flag);
+createFeeSettingBlob(ripple::STAmount base, ripple::STAmount reserveInc, ripple::STAmount reserveBase, uint32_t flag);
 
 /*
  * Create a payment transaction object
  */
 [[nodiscard]] ripple::STObject
-CreatePaymentTransactionObject(
+createPaymentTransactionObject(
     std::string_view accountId1,
     std::string_view accountId2,
     int amount,
@@ -126,7 +126,7 @@ CreatePaymentTransactionObject(
 );
 
 [[nodiscard]] ripple::STObject
-CreatePaymentTransactionMetaObject(
+createPaymentTransactionMetaObject(
     std::string_view accountId1,
     std::string_view accountId2,
     int finalBalance1,
@@ -138,7 +138,7 @@ CreatePaymentTransactionMetaObject(
  * Create an account root ledger object
  */
 [[nodiscard]] ripple::STObject
-CreateAccountRootObject(
+createAccountRootObject(
     std::string_view accountId,
     uint32_t flag,
     uint32_t seq,
@@ -146,7 +146,8 @@ CreateAccountRootObject(
     uint32_t ownerCount,
     std::string_view previousTxnID,
     uint32_t previousTxnSeq,
-    uint32_t transferRate = 0
+    uint32_t transferRate = 0,
+    std::optional<ripple::uint256> ammID = std::nullopt
 );
 
 /*
@@ -155,7 +156,7 @@ CreateAccountRootObject(
  * If reverse is true, taker gets is XRP
  */
 [[nodiscard]] ripple::STObject
-CreateCreateOfferTransactionObject(
+createCreateOfferTransactionObject(
     std::string_view accountId,
     int fee,
     uint32_t seq,
@@ -170,20 +171,21 @@ CreateCreateOfferTransactionObject(
  * Return an issue object with given currency and issue account
  */
 [[nodiscard]] ripple::Issue
-GetIssue(std::string_view currency, std::string_view issuerId);
+getIssue(std::string_view currency, std::string_view issuerId);
 
 /*
  * Create a offer change meta data
  */
 [[nodiscard]] ripple::STObject
-CreateMetaDataForBookChange(
+createMetaDataForBookChange(
     std::string_view currency,
     std::string_view issueId,
     uint32_t transactionIndex,
     int finalTakerGets,
-    int perviousTakerGets,
+    int previousTakerGets,
     int finalTakerPays,
-    int perviousTakerPays
+    int previousTakerPays,
+    std::optional<std::string_view> domain = std::nullopt
 );
 
 /*
@@ -192,7 +194,7 @@ CreateMetaDataForBookChange(
  * If reverse is true, finalTakerPays is XRP
  */
 [[nodiscard]] ripple::STObject
-CreateMetaDataForCreateOffer(
+createMetaDataForCreateOffer(
     std::string_view currency,
     std::string_view issueId,
     uint32_t transactionIndex,
@@ -205,7 +207,7 @@ CreateMetaDataForCreateOffer(
  * Meta data for removing a offer object
  */
 [[nodiscard]] ripple::STObject
-CreateMetaDataForCancelOffer(
+createMetaDataForCancelOffer(
     std::string_view currency,
     std::string_view issueId,
     uint32_t transactionIndex,
@@ -217,13 +219,13 @@ CreateMetaDataForCancelOffer(
  * Create a owner dir ledger object
  */
 [[nodiscard]] ripple::STObject
-CreateOwnerDirLedgerObject(std::vector<ripple::uint256> indexes, std::string_view rootIndex);
+createOwnerDirLedgerObject(std::vector<ripple::uint256> indexes, std::string_view rootIndex);
 
 /*
  * Create a payment channel ledger object
  */
 [[nodiscard]] ripple::STObject
-CreatePaymentChannelLedgerObject(
+createPaymentChannelLedgerObject(
     std::string_view accountId,
     std::string_view destId,
     int amount,
@@ -234,7 +236,7 @@ CreatePaymentChannelLedgerObject(
 );
 
 [[nodiscard]] ripple::STObject
-CreateRippleStateLedgerObject(
+createRippleStateLedgerObject(
     std::string_view currency,
     std::string_view issuerId,
     int balance,
@@ -248,7 +250,7 @@ CreateRippleStateLedgerObject(
 );
 
 [[nodiscard]] ripple::STObject
-CreateOfferLedgerObject(
+createOfferLedgerObject(
     std::string_view account,
     int takerGets,
     int takerPays,
@@ -256,30 +258,31 @@ CreateOfferLedgerObject(
     std::string_view paysCurrency,
     std::string_view getsIssueId,
     std::string_view paysIssueId,
-    std::string_view bookDirId
+    std::string_view bookDirId,
+    std::optional<std::string_view> domain = std::nullopt
 );
 
 [[nodiscard]] ripple::STObject
-CreateTicketLedgerObject(std::string_view account, uint32_t sequence);
+createTicketLedgerObject(std::string_view account, uint32_t sequence);
 
 [[nodiscard]] ripple::STObject
-CreateEscrowLedgerObject(std::string_view account, std::string_view dest);
+createEscrowLedgerObject(std::string_view account, std::string_view dest);
 
 [[nodiscard]] ripple::STObject
-CreateCheckLedgerObject(std::string_view account, std::string_view dest);
+createCheckLedgerObject(std::string_view account, std::string_view dest);
 
 [[nodiscard]] ripple::STObject
-CreateDepositPreauthLedgerObjectByAuth(std::string_view account, std::string_view auth);
+createDepositPreauthLedgerObjectByAuth(std::string_view account, std::string_view auth);
 
 [[nodiscard]] ripple::STObject
-CreateDepositPreauthLedgerObjectByAuthCredentials(
+createDepositPreauthLedgerObjectByAuthCredentials(
     std::string_view account,
     std::string_view issuer,
     std::string_view credType
 );
 
 [[nodiscard]] data::NFT
-CreateNFT(
+createNft(
     std::string_view tokenID,
     std::string_view account,
     ripple::LedgerIndex seq = 1234u,
@@ -288,22 +291,25 @@ CreateNFT(
 );
 
 [[nodiscard]] ripple::STObject
-CreateNFTBuyOffer(std::string_view tokenID, std::string_view account);
+createNftBuyOffer(std::string_view tokenID, std::string_view account);
 
 [[nodiscard]] ripple::STObject
-CreateNFTSellOffer(std::string_view tokenID, std::string_view account);
+createNftSellOffer(std::string_view tokenID, std::string_view account);
 
 [[nodiscard]] ripple::STObject
-CreateSignerLists(std::vector<std::pair<std::string, uint32_t>> const& signers);
+createSignerLists(std::vector<std::pair<std::string, uint32_t>> const& signers);
 
 [[nodiscard]] ripple::STObject
-CreateNFTTokenPage(
+createNftTokenPage(
     std::vector<std::pair<std::string, std::string>> const& tokens,
     std::optional<ripple::uint256> previousPage
 );
 
+/**
+ * Create NFToken mint tx, the metadata contained a changed node
+ */
 [[nodiscard]] data::TransactionAndMetadata
-CreateMintNFTTxWithMetadata(
+createMintNftTxWithMetadata(
     std::string_view accountId,
     uint32_t seq,
     uint32_t fee,
@@ -311,11 +317,57 @@ CreateMintNFTTxWithMetadata(
     std::string_view nftID
 );
 
+/**
+ * Create NFToken mint tx, the metadata contained a created node
+ */
 [[nodiscard]] data::TransactionAndMetadata
-CreateAcceptNFTOfferTxWithMetadata(std::string_view accountId, uint32_t seq, uint32_t fee, std::string_view nftId);
+createMintNftTxWithMetadataOfCreatedNode(
+    std::string_view accountId,
+    uint32_t seq,
+    uint32_t fee,
+    uint32_t nfTokenTaxon,
+    std::optional<std::string_view> nftID,
+    std::optional<std::string_view> uri,
+    std::optional<std::string_view> pageIndex
+);
 
 [[nodiscard]] data::TransactionAndMetadata
-CreateCancelNFTOffersTxWithMetadata(
+createNftModifyTxWithMetadata(std::string_view accountId, std::string_view nftID, ripple::Blob uri);
+
+/**
+ * Create NFToken burn tx, tx causes a nft page node deleted
+ */
+[[nodiscard]] data::TransactionAndMetadata
+createNftBurnTxWithMetadataOfDeletedNode(std::string_view accountId, std::string_view nftID);
+
+/**
+ * Create NFToken mint tx, tx causes a nft page node changed
+ */
+[[nodiscard]] data::TransactionAndMetadata
+createNftBurnTxWithMetadataOfModifiedNode(std::string_view accountId, std::string_view nftID);
+
+[[nodiscard]] data::TransactionAndMetadata
+createAcceptNftBuyerOfferTxWithMetadata(
+    std::string_view accountId,
+    uint32_t seq,
+    uint32_t fee,
+    std::string_view nftId,
+    std::string_view offerId
+);
+
+[[nodiscard]] data::TransactionAndMetadata
+createAcceptNftSellerOfferTxWithMetadata(
+    std::string_view accountId,
+    uint32_t seq,
+    uint32_t fee,
+    std::string_view nftId,
+    std::string_view offerId,
+    std::string_view pageIndex,
+    bool isNewPageCreated
+);
+
+[[nodiscard]] data::TransactionAndMetadata
+createCancelNftOffersTxWithMetadata(
     std::string_view accountId,
     uint32_t seq,
     uint32_t fee,
@@ -323,10 +375,7 @@ CreateCancelNFTOffersTxWithMetadata(
 );
 
 [[nodiscard]] data::TransactionAndMetadata
-CreateCreateNFTOfferTxWithMetadata(std::string_view accountId, uint32_t seq, uint32_t fee, std::string_view offerId);
-
-[[nodiscard]] data::TransactionAndMetadata
-CreateCreateNFTOfferTxWithMetadata(
+createCreateNftOfferTxWithMetadata(
     std::string_view accountId,
     uint32_t seq,
     uint32_t fee,
@@ -336,13 +385,13 @@ CreateCreateNFTOfferTxWithMetadata(
 );
 
 [[nodiscard]] ripple::STObject
-CreateAmendmentsObject(std::vector<ripple::uint256> const& enabledAmendments);
+createAmendmentsObject(std::vector<ripple::uint256> const& enabledAmendments);
 
 [[nodiscard]] ripple::STObject
-CreateBrokenAmendmentsObject();
+createBrokenAmendmentsObject();
 
 [[nodiscard]] ripple::STObject
-CreateAMMObject(
+createAmmObject(
     std::string_view accountId,
     std::string_view assetCurrency,
     std::string_view assetIssuer,
@@ -355,7 +404,7 @@ CreateAMMObject(
 );
 
 [[nodiscard]] ripple::STObject
-CreateBridgeObject(
+createBridgeObject(
     std::string_view accountId,
     std::string_view lockingDoor,
     std::string_view issuingDoor,
@@ -364,7 +413,7 @@ CreateBridgeObject(
 );
 
 [[nodiscard]] ripple::STObject
-CreateChainOwnedClaimIDObject(
+createChainOwnedClaimIdObject(
     std::string_view accountId,
     std::string_view lockingDoor,
     std::string_view issuingDoor,
@@ -374,7 +423,7 @@ CreateChainOwnedClaimIDObject(
 );
 
 [[nodiscard]] ripple::STObject
-CreateChainOwnedCreateAccountClaimID(
+createChainOwnedCreateAccountClaimId(
     std::string_view accountId,
     std::string_view lockingDoor,
     std::string_view issuingDoor,
@@ -383,10 +432,10 @@ CreateChainOwnedCreateAccountClaimID(
 );
 
 void
-AMMAddVoteSlot(ripple::STObject& amm, ripple::AccountID const& accountId, uint16_t tradingFee, uint32_t voteWeight);
+ammAddVoteSlot(ripple::STObject& amm, ripple::AccountID const& accountId, uint16_t tradingFee, uint32_t voteWeight);
 
 void
-AMMSetAuctionSlot(
+ammSetAuctionSlot(
     ripple::STObject& amm,
     ripple::AccountID const& accountId,
     ripple::STAmount price,
@@ -396,19 +445,39 @@ AMMSetAuctionSlot(
 );
 
 [[nodiscard]] ripple::STObject
-CreateDidObject(std::string_view accountId, std::string_view didDoc, std::string_view uri, std::string_view data);
+createDidObject(std::string_view accountId, std::string_view didDoc, std::string_view uri, std::string_view data);
 
 [[nodiscard]] ripple::Currency
-CreateLPTCurrency(std::string_view assetCurrency, std::string_view asset2Currency);
+createLptCurrency(std::string_view assetCurrency, std::string_view asset2Currency);
 
 [[nodiscard]] ripple::STObject
-CreateMPTIssuanceObject(std::string_view accountId, std::uint32_t seq, std::string_view metadata);
+createMptIssuanceObject(std::string_view accountId, std::uint32_t seq, std::string_view metadata);
 
 [[nodiscard]] ripple::STObject
-CreateMPTokenObject(std::string_view accountId, ripple::uint192 issuanceID, std::uint64_t mptAmount = 1);
+createMpTokenObject(std::string_view accountId, ripple::uint192 issuanceID, std::uint64_t mptAmount = 1);
 
 [[nodiscard]] ripple::STObject
-CreateOraclePriceData(
+createPermissionedDomainObject(
+    std::string_view accountId,
+    std::string_view ledgerIndex,
+    ripple::LedgerIndex seq,
+    uint64_t ownerNode,
+    ripple::uint256 previousTxId,
+    uint32_t previousTxSeq
+);
+
+[[nodiscard]] ripple::STObject
+createDelegateObject(
+    std::string_view accountId,
+    std::string_view authorize,
+    std::string_view ledgerIndex,
+    uint64_t ownerNode,
+    ripple::uint256 previousTxId,
+    uint32_t previousTxSeq
+);
+
+[[nodiscard]] ripple::STObject
+createOraclePriceData(
     uint64_t assetPrice,
     ripple::Currency baseAssetCurrency,
     ripple::Currency quoteAssetCurrency,
@@ -416,10 +485,10 @@ CreateOraclePriceData(
 );
 
 [[nodiscard]] ripple::STArray
-CreatePriceDataSeries(std::vector<ripple::STObject> const& series);
+createPriceDataSeries(std::vector<ripple::STObject> const& series);
 
 [[nodiscard]] ripple::STObject
-CreateOracleObject(
+createOracleObject(
     std::string_view accountId,
     std::string_view provider,
     uint64_t ownerNode,
@@ -432,7 +501,7 @@ CreateOracleObject(
 );
 
 [[nodiscard]] data::TransactionAndMetadata
-CreateOracleSetTxWithMetadata(
+createOracleSetTxWithMetadata(
     std::string_view accountId,
     uint32_t seq,
     uint32_t fee,
@@ -445,7 +514,7 @@ CreateOracleSetTxWithMetadata(
 );
 
 [[nodiscard]] ripple::STObject
-CreateCredentialObject(
+createCredentialObject(
     std::string_view acc1,
     std::string_view acc2,
     std::string_view credType,
@@ -454,4 +523,17 @@ CreateCredentialObject(
 );
 
 [[nodiscard]] ripple::STArray
-CreateAuthCredentialArray(std::vector<std::string_view> issuer, std::vector<std::string_view> credType);
+createAuthCredentialArray(std::vector<std::string_view> issuer, std::vector<std::string_view> credType);
+
+[[nodiscard]] ripple::STObject
+createVault(
+    std::string_view owner,
+    std::string_view account,
+    ripple::LedgerIndex seq,
+    std::string_view assetCurrency,
+    std::string_view assetIssuer,
+    ripple::uint192 shareMPTID,
+    uint64_t ownerNode,
+    ripple::uint256 previousTxId,
+    uint32_t previousTxSeq
+);

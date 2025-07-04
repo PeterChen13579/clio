@@ -18,14 +18,15 @@
 //==============================================================================
 
 #include "data/BackendFactory.hpp"
+#include "data/LedgerCache.hpp"
 #include "data/cassandra/Handle.hpp"
 #include "util/AsioContextTestFixture.hpp"
 #include "util/MockPrometheus.hpp"
-#include "util/newconfig/ConfigConstraints.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
-#include "util/newconfig/ConfigFileJson.hpp"
-#include "util/newconfig/ConfigValue.hpp"
-#include "util/newconfig/Types.hpp"
+#include "util/config/ConfigConstraints.hpp"
+#include "util/config/ConfigDefinition.hpp"
+#include "util/config/ConfigFileJson.hpp"
+#include "util/config/ConfigValue.hpp"
+#include "util/config/Types.hpp"
 
 #include <TestGlobals.hpp>
 #include <boost/json/parse.hpp>
@@ -42,15 +43,16 @@
 using namespace util::config;
 
 struct BackendCassandraFactoryTest : SyncAsioContextTest, util::prometheus::WithPrometheus {
-    constexpr static auto keyspace = "factory_test";
+    static constexpr auto kKEYSPACE = "factory_test";
 
+protected:
     ClioConfigDefinition cfg_{
         {"database.type", ConfigValue{ConfigType::String}.defaultValue("cassandra")},
         {"database.cassandra.contact_points",
          ConfigValue{ConfigType::String}.defaultValue(TestGlobals::instance().backendHost)},
         {"database.cassandra.secure_connect_bundle", ConfigValue{ConfigType::String}.optional()},
         {"database.cassandra.port", ConfigValue{ConfigType::Integer}.optional()},
-        {"database.cassandra.keyspace", ConfigValue{ConfigType::String}.defaultValue(keyspace)},
+        {"database.cassandra.keyspace", ConfigValue{ConfigType::String}.defaultValue(kKEYSPACE)},
         {"database.cassandra.replication_factor", ConfigValue{ConfigType::Integer}.defaultValue(1)},
         {"database.cassandra.table_prefix", ConfigValue{ConfigType::String}.optional()},
         {"database.cassandra.max_write_requests_outstanding", ConfigValue{ConfigType::Integer}.defaultValue(10'000)},
@@ -82,41 +84,43 @@ struct BackendCassandraFactoryTest : SyncAsioContextTest, util::prometheus::With
 };
 
 class BackendCassandraFactoryTestWithDB : public BackendCassandraFactoryTest {
-protected:
-    void
-    TearDown() override
+public:
+    ~BackendCassandraFactoryTestWithDB() override
     {
         // drop the keyspace for next test
         data::cassandra::Handle const handle{TestGlobals::instance().backendHost};
         EXPECT_TRUE(handle.connect());
-        handle.execute("DROP KEYSPACE " + std::string{keyspace});
+        handle.execute("DROP KEYSPACE " + std::string{kKEYSPACE});
     }
 };
 
 TEST_F(BackendCassandraFactoryTest, NoSuchBackend)
 {
-    useConfig(R"json( {"database": {"type": "unknown"}} )json");
-    EXPECT_THROW(data::make_Backend(cfg_), std::runtime_error);
+    useConfig(R"JSON( {"database": {"type": "unknown"}} )JSON");
+    auto cache = data::LedgerCache{};
+    EXPECT_THROW(data::makeBackend(cfg_, cache), std::runtime_error);
 }
 
 TEST_F(BackendCassandraFactoryTest, CreateCassandraBackendDBDisconnect)
 {
-    useConfig(R"json(
+    useConfig(R"JSON(
         {"database": {
             "type": "cassandra",
             "cassandra": {
                 "contact_points": "127.0.0.2"
             }
         }}
-    )json");
+    )JSON");
 
-    EXPECT_THROW(data::make_Backend(cfg_), std::runtime_error);
+    auto cache = data::LedgerCache{};
+    EXPECT_THROW(data::makeBackend(cfg_, cache), std::runtime_error);
 }
 
 TEST_F(BackendCassandraFactoryTestWithDB, CreateCassandraBackend)
 {
     {
-        auto backend = data::make_Backend(cfg_);
+        auto cache = data::LedgerCache{};
+        auto backend = data::makeBackend(cfg_, cache);
         EXPECT_TRUE(backend);
 
         // empty db does not have ledger range
@@ -125,12 +129,13 @@ TEST_F(BackendCassandraFactoryTestWithDB, CreateCassandraBackend)
         // insert range table
         data::cassandra::Handle const handle{TestGlobals::instance().backendHost};
         EXPECT_TRUE(handle.connect());
-        handle.execute(fmt::format("INSERT INTO {}.ledger_range (is_latest, sequence) VALUES (False, 100)", keyspace));
-        handle.execute(fmt::format("INSERT INTO {}.ledger_range (is_latest, sequence) VALUES (True, 500)", keyspace));
+        handle.execute(fmt::format("INSERT INTO {}.ledger_range (is_latest, sequence) VALUES (False, 100)", kKEYSPACE));
+        handle.execute(fmt::format("INSERT INTO {}.ledger_range (is_latest, sequence) VALUES (True, 500)", kKEYSPACE));
     }
 
     {
-        auto backend = data::make_Backend(cfg_);
+        auto cache = data::LedgerCache{};
+        auto backend = data::makeBackend(cfg_, cache);
         EXPECT_TRUE(backend);
 
         auto const range = backend->fetchLedgerRange();
@@ -141,15 +146,17 @@ TEST_F(BackendCassandraFactoryTestWithDB, CreateCassandraBackend)
 
 TEST_F(BackendCassandraFactoryTestWithDB, CreateCassandraBackendReadOnlyWithEmptyDB)
 {
-    useConfig(R"json( {"read_only": true} )json");
-    EXPECT_THROW(data::make_Backend(cfg_), std::runtime_error);
+    useConfig(R"JSON( {"read_only": true} )JSON");
+    auto cache = data::LedgerCache{};
+    EXPECT_THROW(data::makeBackend(cfg_, cache), std::runtime_error);
 }
 
 TEST_F(BackendCassandraFactoryTestWithDB, CreateCassandraBackendReadOnlyWithDBReady)
 {
     auto cfgReadOnly = cfg_;
-    ASSERT_FALSE(cfgReadOnly.parse(ConfigFileJson{boost::json::parse(R"json( {"read_only": true} )json").as_object()}));
+    ASSERT_FALSE(cfgReadOnly.parse(ConfigFileJson{boost::json::parse(R"JSON( {"read_only": true} )JSON").as_object()}));
 
-    EXPECT_TRUE(data::make_Backend(cfg_));
-    EXPECT_TRUE(data::make_Backend(cfgReadOnly));
+    auto cache = data::LedgerCache{};
+    EXPECT_TRUE(data::makeBackend(cfg_, cache));
+    EXPECT_TRUE(data::makeBackend(cfgReadOnly, cache));
 }

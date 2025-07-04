@@ -48,7 +48,7 @@ struct GrpcSourceMock {
     MOCK_METHOD(FetchLedgerReturnType, fetchLedger, (uint32_t, bool, bool));
 
     using LoadLedgerReturnType = std::pair<std::vector<std::string>, bool>;
-    MOCK_METHOD(LoadLedgerReturnType, loadInitialLedger, (uint32_t, uint32_t, bool));
+    MOCK_METHOD(LoadLedgerReturnType, loadInitialLedger, (uint32_t, uint32_t));
 };
 
 struct SubscriptionSourceMock {
@@ -58,7 +58,7 @@ struct SubscriptionSourceMock {
     MOCK_METHOD(void, setForwarding, (bool));
     MOCK_METHOD(std::chrono::steady_clock::time_point, lastMessageTime, (), (const));
     MOCK_METHOD(std::string, validatedRange, (), (const));
-    MOCK_METHOD(void, stop, ());
+    MOCK_METHOD(void, stop, (boost::asio::yield_context));
 };
 
 struct ForwardingSourceMock {
@@ -75,6 +75,7 @@ struct ForwardingSourceMock {
 };
 
 struct SourceImplTest : public ::testing::Test {
+protected:
     boost::asio::io_context ioc_;
 
     StrictMock<GrpcSourceMock> grpcSourceMock_;
@@ -100,6 +101,14 @@ TEST_F(SourceImplTest, run)
 {
     EXPECT_CALL(*subscriptionSourceMock_, run());
     source_.run();
+}
+
+TEST_F(SourceImplTest, stop)
+{
+    EXPECT_CALL(*subscriptionSourceMock_, stop);
+    boost::asio::io_context ctx;
+    boost::asio::spawn(ctx, [&](boost::asio::yield_context yield) { source_.stop(yield); });
+    ctx.run();
 }
 
 TEST_F(SourceImplTest, isConnected)
@@ -165,7 +174,7 @@ TEST_F(SourceImplTest, loadInitialLedger)
     uint32_t const ledgerSeq = 123;
     uint32_t const numMarkers = 3;
 
-    EXPECT_CALL(grpcSourceMock_, loadInitialLedger(ledgerSeq, numMarkers, false))
+    EXPECT_CALL(grpcSourceMock_, loadInitialLedger(ledgerSeq, numMarkers))
         .WillOnce(Return(std::make_pair(std::vector<std::string>{}, true)));
     auto const [actualLedgers, actualSuccess] = source_.loadInitialLedger(ledgerSeq, numMarkers);
 

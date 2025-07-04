@@ -24,11 +24,14 @@
  * This file contains a variety of utility functions used when executing the handlers.
  */
 
+#include "data/AmendmentCenterInterface.hpp"
 #include "data/BackendInterface.hpp"
 #include "data/Types.hpp"
 #include "rpc/Errors.hpp"
+#include "rpc/JS.hpp"
 #include "rpc/common/Types.hpp"
 #include "util/JsonUtils.hpp"
+#include "util/Taggable.hpp"
 #include "util/log/Logger.hpp"
 #include "web/Context.hpp"
 
@@ -40,26 +43,33 @@
 #include <boost/regex/v5/regex_fwd.hpp>
 #include <boost/regex/v5/regex_match.hpp>
 #include <fmt/core.h>
-#include <ripple/basics/base_uint.h>
-#include <ripple/json/json_value.h>
-#include <ripple/protocol/AccountID.h>
-#include <ripple/protocol/Book.h>
-#include <ripple/protocol/Fees.h>
-#include <ripple/protocol/Indexes.h>
-#include <ripple/protocol/Issue.h>
-#include <ripple/protocol/Keylet.h>
-#include <ripple/protocol/LedgerHeader.h>
-#include <ripple/protocol/PublicKey.h>
-#include <ripple/protocol/Rate.h>
-#include <ripple/protocol/STAmount.h>
-#include <ripple/protocol/STBase.h>
-#include <ripple/protocol/STLedgerEntry.h>
-#include <ripple/protocol/STObject.h>
-#include <ripple/protocol/STTx.h>
-#include <ripple/protocol/SecretKey.h>
-#include <ripple/protocol/TxMeta.h>
-#include <ripple/protocol/UintTypes.h>
-#include <ripple/protocol/XRPAmount.h>
+#include <xrpl/basics/Number.h>
+#include <xrpl/basics/base_uint.h>
+#include <xrpl/json/json_value.h>
+#include <xrpl/protocol/AccountID.h>
+#include <xrpl/protocol/Book.h>
+#include <xrpl/protocol/Fees.h>
+#include <xrpl/protocol/Indexes.h>
+#include <xrpl/protocol/Issue.h>
+#include <xrpl/protocol/Keylet.h>
+#include <xrpl/protocol/LedgerFormats.h>
+#include <xrpl/protocol/LedgerHeader.h>
+#include <xrpl/protocol/MPTIssue.h>
+#include <xrpl/protocol/PublicKey.h>
+#include <xrpl/protocol/Rate.h>
+#include <xrpl/protocol/SField.h>
+#include <xrpl/protocol/STAmount.h>
+#include <xrpl/protocol/STBase.h>
+#include <xrpl/protocol/STLedgerEntry.h>
+#include <xrpl/protocol/STObject.h>
+#include <xrpl/protocol/STTx.h>
+#include <xrpl/protocol/SecretKey.h>
+#include <xrpl/protocol/Seed.h>
+#include <xrpl/protocol/Serializer.h>
+#include <xrpl/protocol/TxMeta.h>
+#include <xrpl/protocol/UintTypes.h>
+#include <xrpl/protocol/XRPAmount.h>
+#include <xrpl/protocol/jss.h>
 
 #include <chrono>
 #include <cstddef>
@@ -70,7 +80,6 @@
 #include <string>
 #include <tuple>
 #include <utility>
-#include <variant>
 #include <vector>
 
 namespace rpc {
@@ -278,7 +287,7 @@ generatePubLedgerMessage(
  * @param ctx The context of the request
  * @return The ledger info or an error status
  */
-std::variant<Status, ripple::LedgerHeader>
+std::expected<ripple::LedgerHeader, Status>
 ledgerHeaderFromRequest(std::shared_ptr<data::BackendInterface const> const& backend, web::Context const& ctx);
 
 /**
@@ -291,7 +300,7 @@ ledgerHeaderFromRequest(std::shared_ptr<data::BackendInterface const> const& bac
  * @param maxSeq The maximum sequence to search
  * @return The ledger info or an error status
  */
-std::variant<Status, ripple::LedgerHeader>
+std::expected<ripple::LedgerHeader, Status>
 getLedgerHeaderFromHashOrSeq(
     BackendInterface const& backend,
     boost::asio::yield_context yield,
@@ -313,7 +322,7 @@ getLedgerHeaderFromHashOrSeq(
  * @param atOwnedNode The function to call for each owned node
  * @return The status or the account cursor
  */
-std::variant<Status, AccountCursor>
+std::expected<AccountCursor, Status>
 traverseOwnedNodes(
     BackendInterface const& backend,
     ripple::Keylet const& owner,
@@ -340,7 +349,7 @@ traverseOwnedNodes(
  * @param nftIncluded Whether to include NFTs
  * @return The status or the account cursor
  */
-std::variant<Status, AccountCursor>
+std::expected<AccountCursor, Status>
 traverseOwnedNodes(
     BackendInterface const& backend,
     ripple::AccountID const& accountID,
@@ -427,9 +436,74 @@ isFrozen(
 );
 
 /**
+ * @brief Fetches a ledger object and checks if any of the specified flag is set on the account.
+ *
+ * @param backend The backend to use
+ * @param sequence The sequence
+ * @param keylet The keylet representing the object
+ * @param flags The flags to check on the fetched `SLE`.
+ * @param yield The coroutine context
+ * @return true if any of the flag in flags are set for this account; false otherwise
+ */
+bool
+fetchAndCheckAnyFlagsExists(
+    BackendInterface const& backend,
+    std::uint32_t sequence,
+    ripple::Keylet const& keylet,
+    std::vector<std::uint32_t> const& flags,
+    boost::asio::yield_context yield
+);
+
+/**
+ * @brief Whether the trustline is deep frozen.
+ *
+ * For deep freeze, (unlike regular freeze) we do not care which account has the high/low deep freeze flag.
+ * We only care about if the trustline is deep frozen or not.
+ *
+ * @param backend The backend to use
+ * @param sequence The sequence
+ * @param account The account
+ * @param currency The currency
+ * @param issuer The issuer
+ * @param yield The coroutine context
+ * @return true if the account is deep frozen; false otherwise
+ */
+bool
+isDeepFrozen(
+    BackendInterface const& backend,
+    std::uint32_t sequence,
+    ripple::AccountID const& account,
+    ripple::Currency const& currency,
+    ripple::AccountID const& issuer,
+    boost::asio::yield_context yield
+);
+
+/**
+ * @brief Whether the account that owns a LPToken is frozen for the assets in the pool
+ *
+ * @param backend The backend to use
+ * @param sequence The sequence
+ * @param account The account
+ * @param asset The first asset in the pool
+ * @param asset2 The second asset in the pool
+ * @param yield The coroutine context
+ * @return true if account is frozen for one of the assets
+ */
+bool
+isLPTokenFrozen(
+    BackendInterface const& backend,
+    std::uint32_t sequence,
+    ripple::AccountID const& account,
+    ripple::Issue const& asset,
+    ripple::Issue const& asset2,
+    boost::asio::yield_context yield
+);
+
+/**
  * @brief Get the account funds
  *
  * @param backend The backend to use
+ * @param amendmentCenter The amendmentCenter to use
  * @param sequence The sequence
  * @param amount The amount
  * @param id The account ID
@@ -439,6 +513,7 @@ isFrozen(
 ripple::STAmount
 accountFunds(
     BackendInterface const& backend,
+    data::AmendmentCenterInterface const& amendmentCenter,
     std::uint32_t sequence,
     ripple::STAmount const& amount,
     ripple::AccountID const& id,
@@ -449,6 +524,7 @@ accountFunds(
  * @brief Get the amount that an account holds
  *
  * @param backend The backend to use
+ * @param amendmentCenter The amendmentCenter to use
  * @param sequence The sequence
  * @param account The account
  * @param currency The currency
@@ -460,11 +536,35 @@ accountFunds(
 ripple::STAmount
 accountHolds(
     BackendInterface const& backend,
+    data::AmendmentCenterInterface const& amendmentCenter,
     std::uint32_t sequence,
     ripple::AccountID const& account,
     ripple::Currency const& currency,
     ripple::AccountID const& issuer,
     bool zeroIfFrozen,
+    boost::asio::yield_context yield
+);
+
+/**
+ * @brief Get the amount that an LPToken owner holds
+ *
+ * @param backend The backend to use
+ * @param sequence The sequence
+ * @param account The account
+ * @param currency The currency
+ * @param issuer The issuer
+ * @param zeroIfFrozen Whether to return zero if frozen
+ * @param yield The coroutine context
+ * @return The amount account holds
+ */
+ripple::STAmount
+ammAccountHolds(
+    BackendInterface const& backend,
+    std::uint32_t sequence,
+    ripple::AccountID const& account,
+    ripple::Currency const& currency,
+    ripple::AccountID const& issuer,
+    bool const zeroIfFrozen,
     boost::asio::yield_context yield
 );
 
@@ -509,6 +609,7 @@ xrpLiquid(
  * @param book The book
  * @param takerID The taker ID
  * @param backend The backend to use
+ * @param amendmentCenter The amendmentCenter to use
  * @param ledgerSequence The ledger sequence
  * @param yield The coroutine context
  * @return The post processed order book
@@ -519,6 +620,7 @@ postProcessOrderBook(
     ripple::Book const& book,
     ripple::AccountID const& takerID,
     data::BackendInterface const& backend,
+    data::AmendmentCenterInterface const& amendmentCenter,
     std::uint32_t ledgerSequence,
     boost::asio::yield_context yield
 );
@@ -530,10 +632,17 @@ postProcessOrderBook(
  * @param payIssuer The issuer of the currency to pay
  * @param gets The currency to get
  * @param getIssuer The issuer of the currency to get
+ * @param domain The domain
  * @return The book or an error status
  */
-std::variant<Status, ripple::Book>
-parseBook(ripple::Currency pays, ripple::AccountID payIssuer, ripple::Currency gets, ripple::AccountID getIssuer);
+std::expected<ripple::Book, Status>
+parseBook(
+    ripple::Currency pays,
+    ripple::AccountID payIssuer,
+    ripple::Currency gets,
+    ripple::AccountID getIssuer,
+    std::optional<std::string> const& domain
+);
 
 /**
  * @brief Parse the book from the request
@@ -541,7 +650,7 @@ parseBook(ripple::Currency pays, ripple::AccountID payIssuer, ripple::Currency g
  * @param request The request
  * @return The book or an error status
  */
-std::variant<Status, ripple::Book>
+std::expected<ripple::Book, Status>
 parseBook(boost::json::object const& request);
 
 /**
@@ -550,7 +659,7 @@ parseBook(boost::json::object const& request);
  * @param taker The taker as json
  * @return The taker account or an error status
  */
-std::variant<Status, ripple::AccountID>
+std::expected<ripple::AccountID, Status>
 parseTaker(boost::json::value const& taker);
 
 /**
@@ -564,7 +673,7 @@ ripple::Issue
 parseIssue(boost::json::object const& issue);
 
 /**
- * @brief Check whethe the request specifies the `current` or `closed` ledger
+ * @brief Check whether the request specifies the `current` or `closed` ledger
  * @param request The request to check
  * @return true if the request specifies the `current` or `closed` ledger
  */
@@ -587,7 +696,7 @@ isAdminCmd(std::string const& method, boost::json::object const& request);
  * @param request The request
  * @return The NFTID or an error status
  */
-std::variant<ripple::uint256, Status>
+std::expected<ripple::uint256, Status>
 getNFTID(boost::json::object const& request);
 
 /**
@@ -615,8 +724,8 @@ decodeCTID(T const ctid) noexcept
     auto const getCTID64 = [](T const ctid) noexcept -> std::optional<uint64_t> {
         if constexpr (std::is_convertible_v<T, std::string>) {
             std::string const ctidString(ctid);
-            static std::size_t constexpr CTID_STRING_LENGTH = 16;
-            if (ctidString.length() != CTID_STRING_LENGTH)
+            static constexpr std::size_t kCTID_STRING_LENGTH = 16;
+            if (ctidString.length() != kCTID_STRING_LENGTH)
                 return {};
 
             if (!boost::regex_match(ctidString, boost::regex("^[0-9A-F]+$")))
@@ -633,10 +742,10 @@ decodeCTID(T const ctid) noexcept
 
     auto const ctidValue = getCTID64(ctid).value_or(0);
 
-    static uint64_t constexpr CTID_PREFIX = 0xC000'0000'0000'0000ULL;
-    static uint64_t constexpr CTID_PREFIX_MASK = 0xF000'0000'0000'0000ULL;
+    static constexpr uint64_t kCTID_PREFIX = 0xC000'0000'0000'0000ULL;
+    static constexpr uint64_t kCTID_PREFIX_MASK = 0xF000'0000'0000'0000ULL;
 
-    if ((ctidValue & CTID_PREFIX_MASK) != CTID_PREFIX)
+    if ((ctidValue & kCTID_PREFIX_MASK) != kCTID_PREFIX)
         return {};
 
     uint32_t const ledgerSeq = (ctidValue >> 32) & 0xFFFF'FFFUL;
@@ -649,30 +758,31 @@ decodeCTID(T const ctid) noexcept
  * @brief Log the duration of the request processing
  *
  * @tparam T The type of the duration
- * @param ctx The context of the request
+ * @param request The request to log
+ * @param tag The tag of the context of the request
  * @param dur The duration to log
  */
-template <typename T>
+template <typename DurationType>
 void
-logDuration(web::Context const& ctx, T const& dur)
+logDuration(boost::json::object const& request, util::BaseTagDecorator const& tag, DurationType const& dur)
 {
     using boost::json::serialize;
 
-    static util::Logger const log{"RPC"};
-    static std::int64_t constexpr DURATION_ERROR_THRESHOLD_SECONDS = 10;
+    static util::Logger const log{"RPC"};  // NOLINT(readability-identifier-naming)
+    static constexpr std::int64_t kDURATION_ERROR_THRESHOLD_SECONDS = 10;
 
     auto const millis = std::chrono::duration_cast<std::chrono::milliseconds>(dur).count();
     auto const seconds = std::chrono::duration_cast<std::chrono::seconds>(dur).count();
     auto const msg = fmt::format(
-        "Request processing duration = {} milliseconds. request = {}", millis, serialize(util::removeSecret(ctx.params))
+        "Request processing duration = {} milliseconds. request = {}", millis, serialize(util::removeSecret(request))
     );
 
-    if (seconds > DURATION_ERROR_THRESHOLD_SECONDS) {
-        LOG(log.error()) << ctx.tag() << msg;
+    if (seconds > kDURATION_ERROR_THRESHOLD_SECONDS) {
+        LOG(log.error()) << tag << msg;
     } else if (seconds > 1) {
-        LOG(log.warn()) << ctx.tag() << msg;
+        LOG(log.warn()) << tag << msg;
     } else
-        LOG(log.info()) << ctx.tag() << msg;
+        LOG(log.info()) << tag << msg;
 }
 
 /**
@@ -696,7 +806,7 @@ parseRippleLibSeed(boost::json::value const& value);
  * @param atOwnedNode The function to call for each owned node
  * @return The account cursor or an error status
  */
-std::variant<Status, AccountCursor>
+std::expected<AccountCursor, Status>
 traverseNFTObjects(
     BackendInterface const& backend,
     std::uint32_t sequence,

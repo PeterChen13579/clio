@@ -21,7 +21,10 @@
 
 #include "data/BackendInterface.hpp"
 #include "data/DBHelpers.hpp"
+#include "data/LedgerCacheInterface.hpp"
+#include "data/LedgerHeaderCache.hpp"
 #include "data/Types.hpp"
+#include "data/cassandra/Concepts.hpp"
 #include "data/cassandra/Handle.hpp"
 #include "data/cassandra/Schema.hpp"
 #include "data/cassandra/SettingsProvider.hpp"
@@ -34,7 +37,10 @@
 
 #include <boost/asio/spawn.hpp>
 #include <boost/json/object.hpp>
+#include <boost/uuid/string_generator.hpp>
+#include <boost/uuid/uuid.hpp>
 #include <cassandra.h>
+#include <fmt/core.h>
 #include <xrpl/basics/Blob.h>
 #include <xrpl/basics/base_uint.h>
 #include <xrpl/basics/strHex.h>
@@ -43,6 +49,7 @@
 #include <xrpl/protocol/LedgerHeader.h>
 #include <xrpl/protocol/nft.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -56,6 +63,8 @@
 #include <utility>
 #include <vector>
 
+class CacheBackendCassandraTest;
+
 namespace data::cassandra {
 
 /**
@@ -65,31 +74,39 @@ namespace data::cassandra {
  *
  * @tparam SettingsProviderType The settings provider type to use
  * @tparam ExecutionStrategyType The execution strategy type to use
+ * @tparam FetchLedgerCacheType The ledger header cache type to use
  */
-template <SomeSettingsProvider SettingsProviderType, SomeExecutionStrategy ExecutionStrategyType>
+template <
+    SomeSettingsProvider SettingsProviderType,
+    SomeExecutionStrategy ExecutionStrategyType,
+    typename FetchLedgerCacheType = FetchLedgerCache>
 class BasicCassandraBackend : public BackendInterface {
     util::Logger log_{"Backend"};
 
     SettingsProviderType settingsProvider_;
     Schema<SettingsProviderType> schema_;
-
     std::atomic_uint32_t ledgerSequence_ = 0u;
+    friend class ::CacheBackendCassandraTest;
 
 protected:
     Handle handle_;
 
     // have to be mutable because BackendInterface constness :(
     mutable ExecutionStrategyType executor_;
+    // TODO: move to interface level
+    mutable FetchLedgerCacheType ledgerCache_{};
 
 public:
     /**
      * @brief Create a new cassandra/scylla backend instance.
      *
      * @param settingsProvider The settings provider to use
+     * @param cache The ledger cache to use
      * @param readOnly Whether the database should be in readonly mode
      */
-    BasicCassandraBackend(SettingsProviderType settingsProvider, bool readOnly)
-        : settingsProvider_{std::move(settingsProvider)}
+    BasicCassandraBackend(SettingsProviderType settingsProvider, data::LedgerCacheInterface& cache, bool readOnly)
+        : BackendInterface(cache)
+        , settingsProvider_{std::move(settingsProvider)}
         , schema_{settingsProvider_}
         , handle_{settingsProvider_.getSettings()}
         , executor_{settingsProvider_.getSettings(), handle_}
@@ -112,12 +129,22 @@ public:
         try {
             schema_.prepareStatements(handle_);
         } catch (std::runtime_error const& ex) {
-            LOG(log_.error()) << "Failed to prepare the statements: " << ex.what() << "; readOnly: " << readOnly;
-            throw;
+            auto const error = fmt::format(
+                "Failed to prepare the statements: {}; readOnly: {}. ReadOnly should be turned off or another Clio "
+                "node with write access to DB should be started first.",
+                ex.what(),
+                readOnly
+            );
+            LOG(log_.error()) << error;
+            throw std::runtime_error(error);
         }
-
         LOG(log_.info()) << "Created (revamped) CassandraBackend";
     }
+
+    /*
+     * @brief Move constructor is deleted because handle_ is shared by reference with executor
+     */
+    BasicCassandraBackend(BasicCassandraBackend&&) = delete;
 
     TransactionsAndCursor
     fetchAccountTransactions(
@@ -187,13 +214,18 @@ public:
         return {txns, {}};
     }
 
+    void
+    waitForWritesToFinish() override
+    {
+        executor_.sync();
+    }
+
     bool
     doFinishWrites() override
     {
-        // wait for other threads to finish their writes
-        executor_.sync();
+        waitForWritesToFinish();
 
-        if (!range) {
+        if (!range_) {
             executor_.writeSync(schema_->updateLedgerRange, ledgerSequence_, false, ledgerSequence_);
         }
 
@@ -239,11 +271,16 @@ public:
     std::optional<ripple::LedgerHeader>
     fetchLedgerBySequence(std::uint32_t const sequence, boost::asio::yield_context yield) const override
     {
+        if (auto const lock = ledgerCache_.get(); lock.has_value() && lock->seq == sequence)
+            return lock->ledger;
+
         auto const res = executor_.read(yield, schema_->selectLedgerBySeq, sequence);
         if (res) {
             if (auto const& result = res.value(); result) {
                 if (auto const maybeValue = result.template get<std::vector<unsigned char>>(); maybeValue) {
-                    return util::deserializeHeader(ripple::makeSlice(*maybeValue));
+                    auto const header = util::deserializeHeader(ripple::makeSlice(*maybeValue));
+                    ledgerCache_.put(FetchLedgerCache::CacheEntry{header, sequence});
+                    return header;
                 }
 
                 LOG(log_.error()) << "Could not fetch ledger by sequence - no rows";
@@ -618,7 +655,6 @@ public:
                 return seq;
             }
             LOG(log_.debug()) << "Could not fetch ledger object sequence - no rows";
-
         } else {
             LOG(log_.error()) << "Could not fetch ledger object sequence: " << res.error();
         }
@@ -649,7 +685,7 @@ public:
     {
         if (auto const res = executor_.read(yield, schema_->selectSuccessor, key, ledgerSequence); res) {
             if (auto const result = res->template get<ripple::uint256>(); result) {
-                if (*result == lastKey)
+                if (*result == kLAST_KEY)
                     return std::nullopt;
                 return result;
             }
@@ -757,7 +793,7 @@ public:
 
         while (liveAccounts.size() < number) {
             Statement const statement = lastItem ? schema_->selectAccountFromToken.bind(*lastItem, Limit{pageSize})
-                                                 : schema_->selectAccountFromBegining.bind(Limit{pageSize});
+                                                 : schema_->selectAccountFromBeginning.bind(Limit{pageSize});
 
             auto const res = executor_.read(yield, statement);
             if (res) {
@@ -857,12 +893,28 @@ public:
         return {};
     }
 
+    std::expected<std::vector<std::pair<boost::uuids::uuid, std::string>>, std::string>
+    fetchClioNodesData(boost::asio::yield_context yield) const override
+    {
+        auto const readResult = executor_.read(yield, schema_->selectClioNodesData);
+        if (not readResult)
+            return std::unexpected{readResult.error().message()};
+
+        std::vector<std::pair<boost::uuids::uuid, std::string>> result;
+
+        for (auto [uuid, message] : extract<boost::uuids::uuid, std::string>(*readResult)) {
+            result.emplace_back(uuid, std::move(message));
+        }
+
+        return result;
+    }
+
     void
     doWriteLedgerObject(std::string&& key, std::uint32_t const seq, std::string&& blob) override
     {
         LOG(log_.trace()) << " Writing ledger object " << key.size() << ":" << seq << " [" << blob.size() << " bytes]";
 
-        if (range)
+        if (range_)
             executor_.write(schema_->insertDiff, seq, key);
 
         executor_.write(schema_->insertObject, std::move(key), seq, std::move(blob));
@@ -886,19 +938,31 @@ public:
         statements.reserve(data.size() * 10);  // assume 10 transactions avg
 
         for (auto& record : data) {
-            std::transform(
-                std::begin(record.accounts),
-                std::end(record.accounts),
-                std::back_inserter(statements),
-                [this, &record](auto&& account) {
-                    return schema_->insertAccountTx.bind(
-                        std::forward<decltype(account)>(account),
-                        std::make_tuple(record.ledgerSequence, record.transactionIndex),
-                        record.txHash
-                    );
-                }
-            );
+            std::ranges::transform(record.accounts, std::back_inserter(statements), [this, &record](auto&& account) {
+                return schema_->insertAccountTx.bind(
+                    std::forward<decltype(account)>(account),
+                    std::make_tuple(record.ledgerSequence, record.transactionIndex),
+                    record.txHash
+                );
+            });
         }
+
+        executor_.write(std::move(statements));
+    }
+
+    void
+    writeAccountTransaction(AccountTransactionsData record) override
+    {
+        std::vector<Statement> statements;
+        statements.reserve(record.accounts.size());
+
+        std::ranges::transform(record.accounts, std::back_inserter(statements), [this, &record](auto&& account) {
+            return schema_->insertAccountTx.bind(
+                std::forward<decltype(account)>(account),
+                std::make_tuple(record.ledgerSequence, record.transactionIndex),
+                record.txHash
+            );
+        });
 
         executor_.write(std::move(statements));
     }
@@ -909,7 +973,7 @@ public:
         std::vector<Statement> statements;
         statements.reserve(data.size());
 
-        std::transform(std::cbegin(data), std::cend(data), std::back_inserter(statements), [this](auto const& record) {
+        std::ranges::transform(data, std::back_inserter(statements), [this](auto const& record) {
             return schema_->insertNFTTx.bind(
                 record.tokenID, std::make_tuple(record.ledgerSequence, record.transactionIndex), record.txHash
             );
@@ -942,28 +1006,35 @@ public:
         statements.reserve(data.size() * 3);
 
         for (NFTsData const& record : data) {
-            statements.push_back(
-                schema_->insertNFT.bind(record.tokenID, record.ledgerSequence, record.owner, record.isBurned)
-            );
+            if (!record.onlyUriChanged) {
+                statements.push_back(
+                    schema_->insertNFT.bind(record.tokenID, record.ledgerSequence, record.owner, record.isBurned)
+                );
 
-            // If `uri` is set (and it can be set to an empty uri), we know this
-            // is a net-new NFT. That is, this NFT has not been seen before by
-            // us _OR_ it is in the extreme edge case of a re-minted NFT ID with
-            // the same NFT ID as an already-burned token. In this case, we need
-            // to record the URI and link to the issuer_nf_tokens table.
-            if (record.uri) {
-                statements.push_back(schema_->insertIssuerNFT.bind(
-                    ripple::nft::getIssuer(record.tokenID),
-                    static_cast<uint32_t>(ripple::nft::getTaxon(record.tokenID)),
-                    record.tokenID
-                ));
+                // If `uri` is set (and it can be set to an empty uri), we know this
+                // is a net-new NFT. That is, this NFT has not been seen before by
+                // us _OR_ it is in the extreme edge case of a re-minted NFT ID with
+                // the same NFT ID as an already-burned token. In this case, we need
+                // to record the URI and link to the issuer_nf_tokens table.
+                if (record.uri) {
+                    statements.push_back(schema_->insertIssuerNFT.bind(
+                        ripple::nft::getIssuer(record.tokenID),
+                        static_cast<uint32_t>(ripple::nft::getTaxon(record.tokenID)),
+                        record.tokenID
+                    ));
+                    statements.push_back(
+                        schema_->insertNFTURI.bind(record.tokenID, record.ledgerSequence, record.uri.value())
+                    );
+                }
+            } else {
+                // only uri changed, we update the uri table only
                 statements.push_back(
                     schema_->insertNFTURI.bind(record.tokenID, record.ledgerSequence, record.uri.value())
                 );
             }
         }
 
-        executor_.write(std::move(statements));
+        executor_.writeEach(std::move(statements));
     }
 
     void
@@ -972,7 +1043,7 @@ public:
         std::vector<Statement> statements;
         statements.reserve(data.size());
         for (auto [mptId, holder] : data)
-            statements.push_back(schema_->insertMPTHolder.bind(std::move(mptId), std::move(holder)));
+            statements.push_back(schema_->insertMPTHolder.bind(mptId, holder));
 
         executor_.write(std::move(statements));
     }
@@ -990,6 +1061,12 @@ public:
         executor_.writeSync(
             schema_->insertMigratorStatus, data::cassandra::Text{migratorName}, data::cassandra::Text(status)
         );
+    }
+
+    void
+    writeNodeMessage(boost::uuids::uuid const& uuid, std::string message) override
+    {
+        executor_.writeSync(schema_->updateClioNodeMessage, data::cassandra::Text{std::move(message)}, uuid);
     }
 
     bool

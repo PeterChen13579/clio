@@ -20,8 +20,8 @@
 #pragma once
 
 #include "util/Mutex.hpp"
+#include "util/config/ConfigDefinition.hpp"
 #include "util/log/Logger.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
 #include "util/prometheus/Counter.hpp"
 #include "util/prometheus/Gauge.hpp"
 
@@ -96,7 +96,7 @@ public:
      * @return The work queue
      */
     static WorkQueue
-    make_WorkQueue(util::config::ClioConfigDefinition const& config);
+    makeWorkQueue(util::config::ClioConfigDefinition const& config);
 
     /**
      * @brief Submit a job to the work queue.
@@ -167,7 +167,7 @@ public:
     /**
      * @brief Get the size of the queue.
      *
-     * @return The numver of jobs in the queue.
+     * @return The number of jobs in the queue.
      */
     size_t
     size() const;

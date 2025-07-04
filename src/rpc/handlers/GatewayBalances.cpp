@@ -50,7 +50,6 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
-#include <variant>
 #include <vector>
 
 namespace rpc {
@@ -62,15 +61,15 @@ GatewayBalancesHandler::process(GatewayBalancesHandler::Input input, Context con
     auto const range = sharedPtrBackend_->fetchLedgerRange();
     ASSERT(range.has_value(), "GatewayBalances' ledger range must be available");
 
-    auto const lgrInfoOrStatus = getLedgerHeaderFromHashOrSeq(
+    auto const expectedLgrInfo = getLedgerHeaderFromHashOrSeq(
         *sharedPtrBackend_, ctx.yield, input.ledgerHash, input.ledgerIndex, range->maxSequence
     );
 
-    if (auto const status = std::get_if<Status>(&lgrInfoOrStatus))
-        return Error{*status};
+    if (!expectedLgrInfo.has_value())
+        return Error{expectedLgrInfo.error()};
 
     // check account
-    auto const lgrInfo = std::get<ripple::LedgerHeader>(lgrInfoOrStatus);
+    auto const& lgrInfo = expectedLgrInfo.value();
     auto const accountID = accountFromStringStrict(input.account);
     auto const accountLedgerObject =
         sharedPtrBackend_->fetchLedgerObject(ripple::keylet::account(*accountID).key, lgrInfo.seq, ctx.yield);
@@ -80,7 +79,32 @@ GatewayBalancesHandler::process(GatewayBalancesHandler::Input input, Context con
 
     auto output = GatewayBalancesHandler::Output{};
 
+    auto addEscrow = [&](ripple::SLE const& sle) {
+        if (sle.getType() == ripple::ltESCROW) {
+            auto const& escrow = sle.getFieldAmount(ripple::sfAmount);
+            auto& lockedBalance = output.locked[escrow.getCurrency()];
+            if (lockedBalance == beast::zero) {
+                // This is needed to set the currency code correctly
+                lockedBalance = escrow;
+            } else {
+                try {
+                    lockedBalance += escrow;
+                } catch (std::runtime_error const&) {
+                    // Presumably the exception was caused by overflow.
+                    // On overflow return the largest valid STAmount.
+                    // Very large sums of STAmount are approximations
+                    // anyway.
+                    lockedBalance = ripple::STAmount(
+                        lockedBalance.issue(), ripple::STAmount::cMaxValue, ripple::STAmount::cMaxOffset
+                    );
+                }
+            }
+        }
+    };
+
     auto const addToResponse = [&](ripple::SLE const sle) {
+        addEscrow(sle);
+
         if (sle.getType() == ripple::ltRIPPLE_STATE) {
             ripple::STAmount balance = sle.getFieldAmount(ripple::sfBalance);
             auto const lowLimit = sle.getFieldAmount(ripple::sfLowLimit);
@@ -142,12 +166,8 @@ GatewayBalancesHandler::process(GatewayBalancesHandler::Input input, Context con
         addToResponse
     );
 
-    if (auto status = std::get_if<Status>(&ret))
-        return Error{*status};
-
-    auto inHotbalances = [&](auto const& hw) { return output.hotBalances.contains(hw); };
-    if (not std::ranges::all_of(input.hotWallets, inHotbalances))
-        return Error{Status{ClioError::rpcINVALID_HOT_WALLET}};
+    if (!ret.has_value())
+        return Error{ret.error()};
 
     output.accountID = input.account;
     output.ledgerHash = ripple::strHex(lgrInfo.hash);
@@ -198,6 +218,14 @@ tag_invoke(boost::json::value_from_tag, boost::json::value& jv, GatewayBalancesH
 
     if (auto balances = toJson(output.assets); !balances.empty())
         obj[JS(assets)] = balances;
+
+    if (!output.locked.empty()) {
+        boost::json::object lockedObj;
+        for (auto const& [currency, amount] : output.locked) {
+            lockedObj[ripple::to_string(currency)] = amount.getText();
+        }
+        obj[JS(locked)] = std::move(lockedObj);
+    }
 
     obj[JS(account)] = output.accountID;
     obj[JS(ledger_index)] = output.ledgerIndex;

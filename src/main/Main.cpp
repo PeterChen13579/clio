@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of clio: https://github.com/XRPLF/clio
-    Copyright (c) 2022-2024, the clio developers.
+    Copyright (c) 2024, the clio developers.
 
     Permission to use, copy, modify, and distribute this software for any
     purpose with or without fee is hereby granted, provided that the above
@@ -19,12 +19,12 @@
 
 #include "app/CliArgs.hpp"
 #include "app/ClioApplication.hpp"
+#include "app/VerifyConfig.hpp"
 #include "migration/MigrationApplication.hpp"
 #include "rpc/common/impl/HandlerProvider.hpp"
 #include "util/TerminationHandler.hpp"
+#include "util/config/ConfigDefinition.hpp"
 #include "util/log/Logger.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
-#include "util/newconfig/ConfigFileJson.hpp"
 
 #include <cstdlib>
 #include <exception>
@@ -40,36 +40,34 @@ try {
     auto const action = app::CliArgs::parse(argc, argv);
     return action.apply(
         [](app::CliArgs::Action::Exit const& exit) { return exit.exitCode; },
+        [](app::CliArgs::Action::VerifyConfig const& verify) {
+            if (app::parseConfig(verify.configPath)) {
+                std::cout << "Config " << verify.configPath << " is correct"
+                          << "\n";
+                return EXIT_SUCCESS;
+            }
+            return EXIT_FAILURE;
+        },
         [](app::CliArgs::Action::Run const& run) {
-            auto const json = ConfigFileJson::make_ConfigFileJson(run.configPath);
-            if (!json.has_value()) {
-                std::cerr << json.error().error << std::endl;
+            if (not app::parseConfig(run.configPath))
+                return EXIT_FAILURE;
+
+            if (auto const initSuccess = util::LogService::init(gClioConfig); not initSuccess) {
+                std::cerr << initSuccess.error() << std::endl;
                 return EXIT_FAILURE;
             }
-            auto const errors = ClioConfig.parse(json.value());
-            if (errors.has_value()) {
-                for (auto const& err : errors.value())
-                    std::cerr << err.error << std::endl;
-                return EXIT_FAILURE;
-            }
-            util::LogService::init(ClioConfig);
-            app::ClioApplication clio{ClioConfig};
+            app::ClioApplication clio{gClioConfig};
             return clio.run(run.useNgWebServer);
         },
         [](app::CliArgs::Action::Migrate const& migrate) {
-            auto const json = ConfigFileJson::make_ConfigFileJson(migrate.configPath);
-            if (!json.has_value()) {
-                std::cerr << json.error().error << std::endl;
+            if (not app::parseConfig(migrate.configPath))
+                return EXIT_FAILURE;
+
+            if (auto const initSuccess = util::LogService::init(gClioConfig); not initSuccess) {
+                std::cerr << initSuccess.error() << std::endl;
                 return EXIT_FAILURE;
             }
-            auto const errors = ClioConfig.parse(json.value());
-            if (errors.has_value()) {
-                for (auto const& err : errors.value())
-                    std::cerr << err.error << std::endl;
-                return EXIT_FAILURE;
-            }
-            util::LogService::init(ClioConfig);
-            app::MigratorApplication migrator{ClioConfig, migrate.subCmd};
+            app::MigratorApplication migrator{gClioConfig, migrate.subCmd};
             return migrator.run();
         }
     );

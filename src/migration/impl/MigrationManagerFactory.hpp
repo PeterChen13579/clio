@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of clio: https://github.com/XRPLF/clio
-    Copyright (c) 2022-2024, the clio developers.
+    Copyright (c) 2024, the clio developers.
 
     Permission to use, copy, modify, and distribute this software for any
     purpose with or without fee is hereby granted, provided that the above
@@ -19,8 +19,9 @@
 
 #pragma once
 
+#include "data/LedgerCacheInterface.hpp"
 #include "migration/MigrationManagerInterface.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
+#include "util/config/ConfigDefinition.hpp"
 
 #include <expected>
 #include <memory>
@@ -29,13 +30,14 @@
 namespace migration::impl {
 
 /**
- * @brief The factory to create a MigrationManagerInferface
+ * @brief The factory to create a MigrationManagerInterface
  *
  * @param config The configuration of the migration application, it contains the database connection configuration and
  * other migration specific configurations
+ * @param cache The ledger cache to use
  * @return A shared pointer to the MigrationManagerInterface if the creation was successful, otherwise an error message
  */
 std::expected<std::shared_ptr<MigrationManagerInterface>, std::string>
-makeMigrationManager(util::config::ClioConfigDefinition const& config);
+makeMigrationManager(util::config::ClioConfigDefinition const& config, data::LedgerCacheInterface& cache);
 
 }  // namespace migration::impl

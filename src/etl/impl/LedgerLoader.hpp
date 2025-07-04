@@ -26,6 +26,7 @@
 #include "etl/NFTHelpers.hpp"
 #include "etl/SystemState.hpp"
 #include "etl/impl/LedgerFetcher.hpp"
+#include "etlng/LoadBalancerInterface.hpp"
 #include "util/Assert.hpp"
 #include "util/LedgerUtils.hpp"
 #include "util/Profiler.hpp"
@@ -57,6 +58,7 @@ struct FormattedTransactionsData {
     std::vector<NFTTransactionsData> nfTokenTxData;
     std::vector<NFTsData> nfTokensData;
     std::vector<MPTHolderData> mptHoldersData;
+    std::vector<NFTsData> nfTokenURIChanges;
 };
 
 namespace etl::impl {
@@ -64,18 +66,18 @@ namespace etl::impl {
 /**
  * @brief Loads ledger data into the DB
  */
-template <typename LoadBalancerType, typename LedgerFetcherType>
+template <typename LedgerFetcherType>
 class LedgerLoader {
 public:
-    using GetLedgerResponseType = typename LoadBalancerType::GetLedgerResponseType;
-    using OptionalGetLedgerResponseType = typename LoadBalancerType::OptionalGetLedgerResponseType;
-    using RawLedgerObjectType = typename LoadBalancerType::RawLedgerObjectType;
+    using GetLedgerResponseType = etlng::LoadBalancerInterface::GetLedgerResponseType;
+    using OptionalGetLedgerResponseType = etlng::LoadBalancerInterface::OptionalGetLedgerResponseType;
+    using RawLedgerObjectType = etlng::LoadBalancerInterface::RawLedgerObjectType;
 
 private:
     util::Logger log_{"ETL"};
 
     std::shared_ptr<BackendInterface> backend_;
-    std::shared_ptr<LoadBalancerType> loadBalancer_;
+    std::shared_ptr<etlng::LoadBalancerInterface> loadBalancer_;
     std::reference_wrapper<LedgerFetcherType> fetcher_;
     std::reference_wrapper<SystemState const> state_;  // shared state for ETL
 
@@ -85,7 +87,7 @@ public:
      */
     LedgerLoader(
         std::shared_ptr<BackendInterface> backend,
-        std::shared_ptr<LoadBalancerType> balancer,
+        std::shared_ptr<etlng::LoadBalancerInterface> balancer,
         LedgerFetcherType& fetcher,
         SystemState const& state
     )
@@ -100,17 +102,18 @@ public:
      * @brief Insert extracted transaction into the ledger
      *
      * Insert all of the extracted transactions into the ledger, returning transactions related to accounts,
-     * transactions related to NFTs, and NFTs themselves for later processsing.
+     * transactions related to NFTs, and NFTs themselves for later processing.
      *
      * @param ledger ledger to insert transactions into
      * @param data data extracted from an ETL source
-     * @return The neccessary info to write the account_transactions/account_tx and nft_token_transactions tables
+     * @return The necessary info to write the account_transactions/account_tx and nft_token_transactions tables
      */
     FormattedTransactionsData
     insertTransactions(ripple::LedgerHeader const& ledger, GetLedgerResponseType& data)
     {
         FormattedTransactionsData result;
 
+        std::vector<NFTsData> nfTokenURIChanges;
         for (auto& txn : *(data.mutable_transactions_list()->mutable_transactions())) {
             std::string* raw = txn.mutable_transaction_blob();
 
@@ -119,20 +122,27 @@ public:
 
             LOG(log_.trace()) << "Inserting transaction = " << sttx.getTransactionID();
 
-            ripple::TxMeta txMeta{sttx.getTransactionID(), ledger.seq, txn.metadata_blob()};
+            ripple::TxMeta const txMeta{sttx.getTransactionID(), ledger.seq, txn.metadata_blob()};
 
             auto const [nftTxs, maybeNFT] = getNFTDataFromTx(txMeta, sttx);
             result.nfTokenTxData.insert(result.nfTokenTxData.end(), nftTxs.begin(), nftTxs.end());
-            if (maybeNFT)
-                result.nfTokensData.push_back(*maybeNFT);
+
+            // We need to unique the URI changes separately, in case the URI changes are discarded
+            if (maybeNFT) {
+                if (maybeNFT->onlyUriChanged) {
+                    nfTokenURIChanges.push_back(*maybeNFT);
+                } else {
+                    result.nfTokensData.push_back(*maybeNFT);
+                }
+            }
 
             auto const maybeMPTHolder = getMPTHolderFromTx(txMeta, sttx);
             if (maybeMPTHolder)
                 result.mptHoldersData.push_back(*maybeMPTHolder);
 
             result.accountTxData.emplace_back(txMeta, sttx.getTransactionID());
-            static constexpr std::size_t KEY_SIZE = 32;
-            std::string keyStr{reinterpret_cast<char const*>(sttx.getTransactionID().data()), KEY_SIZE};
+            static constexpr std::size_t kEY_SIZE = 32;
+            std::string keyStr{reinterpret_cast<char const*>(sttx.getTransactionID().data()), kEY_SIZE};
             backend_->writeTransaction(
                 std::move(keyStr),
                 ledger.seq,
@@ -143,6 +153,10 @@ public:
         }
 
         result.nfTokensData = getUniqueNFTsDatas(result.nfTokensData);
+        nfTokenURIChanges = getUniqueNFTsDatas(nfTokenURIChanges);
+
+        // Put uri change at the end to ensure the uri not overwritten
+        result.nfTokensData.insert(result.nfTokensData.end(), nfTokenURIChanges.begin(), nfTokenURIChanges.end());
         return result;
     }
 
@@ -204,10 +218,10 @@ public:
                         backend_->writeSuccessor(std::move(key), sequence, uint256ToString(succ->key));
                 }
 
-                ripple::uint256 prev = data::firstKey;
+                ripple::uint256 prev = data::kFIRST_KEY;
                 while (auto cur = backend_->cache().getSuccessor(prev, sequence)) {
-                    ASSERT(cur.has_value(), "Succesor for key {} must exist", ripple::strHex(prev));
-                    if (prev == data::firstKey)
+                    ASSERT(cur.has_value(), "Successor for key {} must exist", ripple::strHex(prev));
+                    if (prev == data::kFIRST_KEY)
                         backend_->writeSuccessor(uint256ToString(prev), sequence, uint256ToString(cur->key));
 
                     if (isBookDir(cur->key, cur->blob)) {
@@ -228,12 +242,12 @@ public:
                     }
 
                     prev = cur->key;
-                    static constexpr std::size_t LOG_INTERVAL = 100000;
-                    if (numWrites % LOG_INTERVAL == 0 && numWrites != 0)
+                    static constexpr std::size_t kLOG_STRIDE = 100000;
+                    if (numWrites % kLOG_STRIDE == 0 && numWrites != 0)
                         LOG(log_.info()) << "Wrote " << numWrites << " book successors";
                 }
 
-                backend_->writeSuccessor(uint256ToString(prev), sequence, uint256ToString(data::lastKey));
+                backend_->writeSuccessor(uint256ToString(prev), sequence, uint256ToString(data::kLAST_KEY));
                 ++numWrites;
             });
 

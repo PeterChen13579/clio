@@ -16,6 +16,9 @@ option(coverage "Build test coverage report" FALSE)
 option(packaging "Create distribution packages" FALSE)
 option(lint "Run clang-tidy checks during compilation" FALSE)
 option(static "Statically linked Clio" FALSE)
+option(snapshot "Build snapshot tool" FALSE)
+option(time_trace "Build using -ftime-trace to create compiler trace reports" FALSE)
+
 # ========================================================================== #
 set(san "" CACHE STRING "Add sanitizer instrumentation")
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
@@ -65,15 +68,21 @@ endif ()
 
 # Enable selected sanitizer if enabled via `san`
 if (san)
+  set(SUPPORTED_SANITIZERS "address" "thread" "memory" "undefined")
+  list(FIND SUPPORTED_SANITIZERS "${san}" INDEX)
+  if (INDEX EQUAL -1)
+    message(FATAL_ERROR "Error: Unsupported sanitizer '${san}'. Supported values are: ${SUPPORTED_SANITIZERS}.")
+  endif ()
+
   target_compile_options(
-    clio PUBLIC # Sanitizers recommend minimum of -O1 for reasonable performance
-                $<$<CONFIG:Debug>:-O1> ${SAN_FLAG} -fno-omit-frame-pointer
+    clio_options INTERFACE # Sanitizers recommend minimum of -O1 for reasonable performance
+                           $<$<CONFIG:Debug>:-O1> ${SAN_FLAG} -fno-omit-frame-pointer
   )
   target_compile_definitions(
-    clio PUBLIC $<$<STREQUAL:${san},address>:SANITIZER=ASAN> $<$<STREQUAL:${san},thread>:SANITIZER=TSAN>
-                $<$<STREQUAL:${san},memory>:SANITIZER=MSAN> $<$<STREQUAL:${san},undefined>:SANITIZER=UBSAN>
+    clio_options INTERFACE $<$<STREQUAL:${san},address>:SANITIZER=ASAN> $<$<STREQUAL:${san},thread>:SANITIZER=TSAN>
+                           $<$<STREQUAL:${san},memory>:SANITIZER=MSAN> $<$<STREQUAL:${san},undefined>:SANITIZER=UBSAN>
   )
-  target_link_libraries(clio INTERFACE ${SAN_FLAG} ${SAN_LIB})
+  target_link_libraries(clio_options INTERFACE ${SAN_FLAG} ${SAN_LIB})
 endif ()
 
 include(cmake/SHAMap.cmake)
@@ -88,6 +97,6 @@ if (packaging)
   include(cmake/packaging.cmake) # This file exists only in build runner
 endif ()
 
-# build go tools
-include(cmake/CGo.cmake)
-add_subdirectory(tools/db_checker)
+if (snapshot)
+  add_subdirectory(tools/snapshot)
+endif ()

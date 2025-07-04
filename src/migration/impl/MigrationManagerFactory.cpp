@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of clio: https://github.com/XRPLF/clio
-    Copyright (c) 2022-2024, the clio developers.
+    Copyright (c) 2024, the clio developers.
 
     Permission to use, copy, modify, and distribute this software for any
     purpose with or without fee is hereby granted, provided that the above
@@ -19,12 +19,13 @@
 
 #include "migration/impl/MigrationManagerFactory.hpp"
 
+#include "data/LedgerCacheInterface.hpp"
 #include "data/cassandra/SettingsProvider.hpp"
 #include "migration/MigrationManagerInterface.hpp"
 #include "migration/cassandra/CassandraMigrationBackend.hpp"
 #include "migration/cassandra/CassandraMigrationManager.hpp"
+#include "util/config/ConfigDefinition.hpp"
 #include "util/log/Logger.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
 
 #include <boost/algorithm/string/predicate.hpp>
 
@@ -35,9 +36,9 @@
 namespace migration::impl {
 
 std::expected<std::shared_ptr<MigrationManagerInterface>, std::string>
-makeMigrationManager(util::config::ClioConfigDefinition const& config)
+makeMigrationManager(util::config::ClioConfigDefinition const& config, data::LedgerCacheInterface& cache)
 {
-    static util::Logger const log{"Migration"};
+    static util::Logger const log{"Migration"};  // NOLINT(readability-identifier-naming)
     LOG(log.info()) << "Constructing MigrationManager";
 
     auto const type = config.get<std::string>("database.type");
@@ -48,11 +49,10 @@ makeMigrationManager(util::config::ClioConfigDefinition const& config)
     }
 
     auto const cfg = config.getObject("database." + type);
-
     auto migrationCfg = config.getObject("migration");
 
     return std::make_shared<cassandra::CassandraMigrationManager>(
-        std::make_shared<cassandra::CassandraMigrationBackend>(data::cassandra::SettingsProvider{cfg}),
+        std::make_shared<cassandra::CassandraMigrationBackend>(data::cassandra::SettingsProvider{cfg}, cache),
         std::move(migrationCfg)
     );
 }

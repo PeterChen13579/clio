@@ -64,34 +64,18 @@ template <typename StreamType>
 class WsConnection : public WsConnectionBase {
     boost::beast::websocket::stream<StreamType> stream_;
     boost::beast::http::request<boost::beast::http::string_body> initialRequest_;
+    bool closed_{false};
 
 public:
     WsConnection(
-        boost::asio::ip::tcp::socket socket,
+        StreamType&& stream,
         std::string ip,
         boost::beast::flat_buffer buffer,
         boost::beast::http::request<boost::beast::http::string_body> initialRequest,
         util::TagDecoratorFactory const& tagDecoratorFactory
     )
-        requires IsTcpStream<StreamType>
         : WsConnectionBase(std::move(ip), std::move(buffer), tagDecoratorFactory)
-        , stream_(std::move(socket))
-        , initialRequest_(std::move(initialRequest))
-    {
-        setupWsStream();
-    }
-
-    WsConnection(
-        boost::asio::ip::tcp::socket socket,
-        std::string ip,
-        boost::beast::flat_buffer buffer,
-        boost::asio::ssl::context& sslContext,
-        boost::beast::http::request<boost::beast::http::string_body> initialRequest,
-        util::TagDecoratorFactory const& tagDecoratorFactory
-    )
-        requires IsSslTcpStream<StreamType>
-        : WsConnectionBase(std::move(ip), std::move(buffer), tagDecoratorFactory)
-        , stream_(std::move(socket), sslContext)
+        , stream_(std::move(stream))
         , initialRequest_(std::move(initialRequest))
     {
         setupWsStream();
@@ -159,6 +143,13 @@ public:
     void
     close(boost::asio::yield_context yield) override
     {
+        if (closed_)
+            return;
+
+        // This should be set before the async_close(). Otherwise there is a possibility to have multiple coroutines
+        // waiting on async_close(), but only one will be woken up after the actual close happened, others will hang.
+        closed_ = true;
+
         boost::system::error_code error;  // unused
         stream_.async_close(boost::beast::websocket::close_code::normal, yield[error]);
     }
@@ -169,7 +160,7 @@ private:
     {
         // Disable the timeout. The websocket::stream uses its own timeout settings.
         boost::beast::get_lowest_layer(stream_).expires_never();
-        setTimeout(DEFAULT_TIMEOUT);
+        setTimeout(kDEFAULT_TIMEOUT);
         stream_.set_option(
             boost::beast::websocket::stream_base::decorator([](boost::beast::websocket::response_type& res) {
                 res.set(boost::beast::http::field::server, util::build::getClioFullVersionString());
@@ -181,25 +172,24 @@ private:
 using PlainWsConnection = WsConnection<boost::beast::tcp_stream>;
 using SslWsConnection = WsConnection<boost::asio::ssl::stream<boost::beast::tcp_stream>>;
 
-std::expected<std::unique_ptr<PlainWsConnection>, Error>
-make_PlainWsConnection(
-    boost::asio::ip::tcp::socket socket,
+template <typename StreamType>
+std::expected<std::unique_ptr<WsConnection<StreamType>>, Error>
+makeWsConnection(
+    StreamType&& stream,
     std::string ip,
     boost::beast::flat_buffer buffer,
     boost::beast::http::request<boost::beast::http::string_body> request,
     util::TagDecoratorFactory const& tagDecoratorFactory,
     boost::asio::yield_context yield
-);
-
-std::expected<std::unique_ptr<SslWsConnection>, Error>
-make_SslWsConnection(
-    boost::asio::ip::tcp::socket socket,
-    std::string ip,
-    boost::beast::flat_buffer buffer,
-    boost::beast::http::request<boost::beast::http::string_body> request,
-    boost::asio::ssl::context& sslContext,
-    util::TagDecoratorFactory const& tagDecoratorFactory,
-    boost::asio::yield_context yield
-);
+)
+{
+    auto connection = std::make_unique<WsConnection<StreamType>>(
+        std::forward<StreamType>(stream), std::move(ip), std::move(buffer), std::move(request), tagDecoratorFactory
+    );
+    auto maybeError = connection->performHandshake(yield);
+    if (maybeError.has_value())
+        return std::unexpected{maybeError.value()};
+    return connection;
+}
 
 }  // namespace web::ng::impl

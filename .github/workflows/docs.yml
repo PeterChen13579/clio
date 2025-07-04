@@ -1,38 +1,38 @@
 name: Documentation
+
 on:
   push:
     branches: [develop]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
 concurrency:
-  group: "pages"
+  # Only cancel in-progress jobs or runs for the current workflow - matches against branch & tags
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-20.04
-    continue-on-error: true
+  build:
+    runs-on: ubuntu-latest
     container:
-      image: rippleci/clio_ci:latest
+      image: ghcr.io/xrplf/clio-ci:latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with: 
+        with:
           lfs: true
 
-      - name: Build docs
-        run: |
-          mkdir -p build_docs && cd build_docs
-          cmake ../docs && cmake --build . --target docs
-      
+      - name: Create build directory
+        run: mkdir build_docs
+
+      - name: Configure CMake
+        working-directory: build_docs
+        run: cmake ../docs
+
+      - name: Build
+        working-directory: build_docs
+        run: cmake --build . --target docs
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
@@ -41,7 +41,20 @@ jobs:
         with:
           path: build_docs/html
           name: docs-develop
-      
+
+  deploy:
+    needs: build
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    runs-on: ubuntu-latest
+
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

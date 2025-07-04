@@ -20,8 +20,8 @@
 #pragma once
 
 #include "util/Taggable.hpp"
+#include "util/config/ConfigDefinition.hpp"
 #include "util/log/Logger.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
 #include "web/ng/Connection.hpp"
 #include "web/ng/MessageHandler.hpp"
 #include "web/ng/ProcessingPolicy.hpp"
@@ -33,6 +33,7 @@
 #include <boost/asio/spawn.hpp>
 #include <boost/asio/ssl/context.hpp>
 
+#include <concepts>
 #include <cstddef>
 #include <functional>
 #include <optional>
@@ -41,9 +42,19 @@
 namespace web::ng {
 
 /**
+ * @brief A tag class for server to help identify Server in templated code.
+ */
+struct ServerTag {
+    virtual ~ServerTag() = default;
+};
+
+template <typename T>
+concept SomeServer = std::derived_from<T, ServerTag>;
+
+/**
  * @brief Web server class.
  */
-class Server {
+class Server : public ServerTag {
 public:
     /**
      * @brief Check to perform for each new client connection. The check takes client ip as input and returns a Response
@@ -105,9 +116,9 @@ public:
     Server(Server const&) = delete;
 
     /**
-     * @brief Move constructor is defaulted.
+     * @brief Move constructor is deleted because connectionHandler_ contains references to some fields of the Server.
      */
-    Server(Server&&) = default;
+    Server(Server&&) = delete;
 
     /**
      * @brief Set handler for GET requests.
@@ -147,11 +158,13 @@ public:
     run();
 
     /**
-     * @brief Stop the server.
-     ** @note Stopping the server cause graceful shutdown of all connections. And rejecting new connections.
+     * @brief Stop the server. This method will asynchronously sleep unless all the users are disconnected.
+     * @note Stopping the server cause graceful shutdown of all connections. And rejecting new connections.
+     *
+     * @param yield The coroutine context.
      */
     void
-    stop();
+    stop(boost::asio::yield_context yield);
 
 private:
     void
@@ -169,7 +182,7 @@ private:
  * @return The Server or an error message.
  */
 std::expected<Server, std::string>
-make_Server(
+makeServer(
     util::config::ClioConfigDefinition const& config,
     Server::OnConnectCheck onConnectCheck,
     Server::OnDisconnectHook onDisconnectHook,

@@ -102,6 +102,12 @@ public:
         subscriptionSource_->run();
     }
 
+    void
+    stop(boost::asio::yield_context yield) final
+    {
+        subscriptionSource_->stop(yield);
+    }
+
     /**
      * @brief Check if source is connected
      *
@@ -192,13 +198,12 @@ public:
      *
      * @param sequence Sequence of the ledger to download
      * @param numMarkers Number of markers to generate for async calls
-     * @param cacheOnly Only insert into cache, not the DB; defaults to false
      * @return A std::pair of the data and a bool indicating whether the download was successful
      */
     std::pair<std::vector<std::string>, bool>
-    loadInitialLedger(uint32_t sequence, std::uint32_t numMarkers, bool cacheOnly = false) final
+    loadInitialLedger(uint32_t sequence, std::uint32_t numMarkers) final
     {
-        return grpcSource_.loadInitialLedger(sequence, numMarkers, cacheOnly);
+        return grpcSource_.loadInitialLedger(sequence, numMarkers);
     }
 
     /**

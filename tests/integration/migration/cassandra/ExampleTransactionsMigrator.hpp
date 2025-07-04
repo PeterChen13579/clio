@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of clio: https://github.com/XRPLF/clio
-    Copyright (c) 2022-2024, the clio developers.
+    Copyright (c) 2024, the clio developers.
 
     Permission to use, copy, modify, and distribute this software for any
     purpose with or without fee is hereby granted, provided that the above
@@ -20,7 +20,7 @@
 #pragma once
 
 #include "migration/cassandra/CassandraMigrationTestBackend.hpp"
-#include "util/newconfig/ObjectView.hpp"
+#include "util/config/ObjectView.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -30,8 +30,8 @@
  * and migrate the data to index table. We create an index table for transaction hash to transaction type string.
  */
 struct ExampleTransactionsMigrator {
-    static constexpr char const* name = "ExampleTransactionsMigrator";
-    static constexpr char const* description = "The migrator for transactions table";
+    static constexpr char const* kNAME = "ExampleTransactionsMigrator";
+    static constexpr char const* kDESCRIPTION = "The migrator for transactions table";
 
     using Backend = CassandraMigrationTestBackend;
     static std::uint64_t count;

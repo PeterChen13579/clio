@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of clio: https://github.com/XRPLF/clio
-    Copyright (c) 2022-2024, the clio developers.
+    Copyright (c) 2024, the clio developers.
 
     Permission to use, copy, modify, and distribute this software for any
     purpose with or without fee is hereby granted, provided that the above
@@ -19,8 +19,9 @@
 
 #pragma once
 
+#include "data/LedgerCache.hpp"
 #include "migration/MigrationManagerInterface.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
+#include "util/config/ConfigDefinition.hpp"
 
 #include <memory>
 #include <string>
@@ -76,6 +77,7 @@ class MigratorApplication {
     std::string option_;
     std::shared_ptr<migration::MigrationManagerInterface> migrationManager_;
     MigrateSubCmd cmd_;
+    data::LedgerCache cache_;
 
 public:
     /**

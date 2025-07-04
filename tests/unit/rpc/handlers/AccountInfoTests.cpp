@@ -44,23 +44,28 @@
 #include <vector>
 
 using namespace rpc;
+using namespace data;
 namespace json = boost::json;
 using namespace testing;
 
-constexpr static auto ACCOUNT = "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn";
-constexpr static auto ACCOUNT1 = "rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW";
-constexpr static auto ACCOUNT2 = "rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun";
-constexpr static auto LEDGERHASH = "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652";
-constexpr static auto INDEX1 = "1B8590C01B0006EDFA9ED60296DD052DC5E90F99659B25014D08E1BC983515BC";
+namespace {
+
+constexpr auto kACCOUNT = "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn";
+constexpr auto kACCOUNT1 = "rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW";
+constexpr auto kACCOUNT2 = "rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun";
+constexpr auto kLEDGER_HASH = "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652";
+constexpr auto kINDEX1 = "1B8590C01B0006EDFA9ED60296DD052DC5E90F99659B25014D08E1BC983515BC";
+
+}  // namespace
 
 struct RPCAccountInfoHandlerTest : HandlerBaseTest {
     RPCAccountInfoHandlerTest()
     {
-        backend->setRange(10, 30);
+        backend_->setRange(10, 30);
     }
 
 protected:
-    StrictMockAmendmentCenterSharedPtr mockAmendmentCenterPtr;
+    StrictMockAmendmentCenterSharedPtr mockAmendmentCenterPtr_;
 };
 
 struct AccountInfoParamTestCaseBundle {
@@ -79,55 +84,55 @@ generateTestValuesForParametersTest()
     return std::vector<AccountInfoParamTestCaseBundle>{
         AccountInfoParamTestCaseBundle{
             .testName = "MissingAccountAndIdent",
-            .testJson = R"({})",
+            .testJson = R"JSON({})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Missing field 'account'."
         },
         AccountInfoParamTestCaseBundle{
             .testName = "AccountNotString",
-            .testJson = R"({"account":1})",
+            .testJson = R"JSON({"account": 1})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "accountNotString"
         },
         AccountInfoParamTestCaseBundle{
             .testName = "AccountInvalid",
-            .testJson = R"({"account":"xxx"})",
+            .testJson = R"JSON({"account": "xxx"})JSON",
             .expectedError = "actMalformed",
             .expectedErrorMessage = "accountMalformed"
         },
         AccountInfoParamTestCaseBundle{
             .testName = "IdentNotString",
-            .testJson = R"({"ident":1})",
+            .testJson = R"JSON({"ident": 1})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "identNotString"
         },
         AccountInfoParamTestCaseBundle{
             .testName = "IdentInvalid",
-            .testJson = R"({"ident":"xxx"})",
+            .testJson = R"JSON({"ident": "xxx"})JSON",
             .expectedError = "actMalformed",
             .expectedErrorMessage = "identMalformed"
         },
         AccountInfoParamTestCaseBundle{
             .testName = "SignerListsInvalid",
-            .testJson = R"({"ident":"rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun", "signer_lists":1})",
+            .testJson = R"JSON({"ident": "rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun", "signer_lists": 1})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters."
         },
         AccountInfoParamTestCaseBundle{
             .testName = "LedgerHashInvalid",
-            .testJson = R"({"ident":"rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun", "ledger_hash":"1"})",
+            .testJson = R"JSON({"ident": "rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun", "ledger_hash": "1"})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "ledger_hashMalformed"
         },
         AccountInfoParamTestCaseBundle{
             .testName = "LedgerHashNotString",
-            .testJson = R"({"ident":"rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun", "ledger_hash":1})",
+            .testJson = R"JSON({"ident": "rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun", "ledger_hash": 1})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "ledger_hashNotString"
         },
         AccountInfoParamTestCaseBundle{
             .testName = "LedgerIndexInvalid",
-            .testJson = R"({"ident":"rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun", "ledger_index":"a"})",
+            .testJson = R"JSON({"ident": "rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun", "ledger_index": "a"})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "ledgerIndexMalformed"
         },
@@ -138,14 +143,14 @@ INSTANTIATE_TEST_CASE_P(
     RPCAccountInfoGroup1,
     AccountInfoParameterTest,
     ValuesIn(generateTestValuesForParametersTest()),
-    tests::util::NameGenerator
+    tests::util::kNAME_GENERATOR
 );
 
 TEST_P(AccountInfoParameterTest, InvalidParams)
 {
     auto const testBundle = GetParam();
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{AccountInfoHandler{backend, mockAmendmentCenterPtr}};
+        auto const handler = AnyHandler{AccountInfoHandler{backend_, mockAmendmentCenterPtr_}};
         auto const req = json::parse(testBundle.testJson);
         auto const output = handler.process(req, Context{.yield = yield, .apiVersion = 2});
         ASSERT_FALSE(output);
@@ -158,15 +163,15 @@ TEST_P(AccountInfoParameterTest, InvalidParams)
 
 TEST_F(AccountInfoParameterTest, ApiV1SignerListIsNotBool)
 {
-    static constexpr auto reqJson = R"(
-        {"ident":"rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun", "signer_lists":1}
-    )";
+    static constexpr auto kREQ_JSON = R"JSON(
+        {"ident": "rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun", "signer_lists": 1}
+    )JSON";
 
-    EXPECT_CALL(*backend, fetchLedgerBySequence);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence);
 
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{AccountInfoHandler{backend, mockAmendmentCenterPtr}};
-        auto const req = json::parse(reqJson);
+        auto const handler = AnyHandler{AccountInfoHandler{backend_, mockAmendmentCenterPtr_}};
+        auto const req = json::parse(kREQ_JSON);
         auto const output = handler.process(req, Context{.yield = yield, .apiVersion = 1});
         ASSERT_FALSE(output);
 
@@ -178,20 +183,20 @@ TEST_F(AccountInfoParameterTest, ApiV1SignerListIsNotBool)
 
 TEST_F(RPCAccountInfoHandlerTest, LedgerNonExistViaIntSequence)
 {
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
     // return empty ledgerHeader
-    ON_CALL(*backend, fetchLedgerBySequence(30, _)).WillByDefault(Return(std::optional<ripple::LedgerHeader>{}));
+    ON_CALL(*backend_, fetchLedgerBySequence(30, _)).WillByDefault(Return(std::optional<ripple::LedgerHeader>{}));
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
             "account": "{}",
             "ledger_index": 30
-        }})",
-        ACCOUNT
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{AccountInfoHandler{backend, mockAmendmentCenterPtr}};
+    auto const handler = AnyHandler{AccountInfoHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "lgrNotFound");
@@ -201,20 +206,20 @@ TEST_F(RPCAccountInfoHandlerTest, LedgerNonExistViaIntSequence)
 
 TEST_F(RPCAccountInfoHandlerTest, LedgerNonExistViaStringSequence)
 {
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
     // return empty ledgerHeader
-    ON_CALL(*backend, fetchLedgerBySequence(30, _)).WillByDefault(Return(std::nullopt));
+    ON_CALL(*backend_, fetchLedgerBySequence(30, _)).WillByDefault(Return(std::nullopt));
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
             "account": "{}",
             "ledger_index": "30"
-        }})",
-        ACCOUNT
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{AccountInfoHandler{backend, mockAmendmentCenterPtr}};
+    auto const handler = AnyHandler{AccountInfoHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "lgrNotFound");
@@ -224,22 +229,22 @@ TEST_F(RPCAccountInfoHandlerTest, LedgerNonExistViaStringSequence)
 
 TEST_F(RPCAccountInfoHandlerTest, LedgerNonExistViaHash)
 {
-    EXPECT_CALL(*backend, fetchLedgerByHash).Times(1);
+    EXPECT_CALL(*backend_, fetchLedgerByHash).Times(1);
     // return empty ledgerHeader
-    ON_CALL(*backend, fetchLedgerByHash(ripple::uint256{LEDGERHASH}, _))
+    ON_CALL(*backend_, fetchLedgerByHash(ripple::uint256{kLEDGER_HASH}, _))
         .WillByDefault(Return(std::optional<ripple::LedgerHeader>{}));
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
             "account": "{}",
             "ledger_hash": "{}"
-        }})",
-        ACCOUNT,
-        LEDGERHASH
+        }})JSON",
+        kACCOUNT,
+        kLEDGER_HASH
     ));
-    auto const handler = AnyHandler{AccountInfoHandler{backend, mockAmendmentCenterPtr}};
+    auto const handler = AnyHandler{AccountInfoHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "lgrNotFound");
@@ -249,22 +254,22 @@ TEST_F(RPCAccountInfoHandlerTest, LedgerNonExistViaHash)
 
 TEST_F(RPCAccountInfoHandlerTest, AccountNotExist)
 {
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, 30);
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, 30);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
 
-    ON_CALL(*backend, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
-    ON_CALL(*backend, doFetchLedgerObject).WillByDefault(Return(std::optional<Blob>{}));
-    EXPECT_CALL(*backend, doFetchLedgerObject).Times(1);
+    ON_CALL(*backend_, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
+    ON_CALL(*backend_, doFetchLedgerObject).WillByDefault(Return(std::optional<Blob>{}));
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(1);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
             "account": "{}"
-        }})",
-        ACCOUNT
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{AccountInfoHandler{backend, mockAmendmentCenterPtr}};
+    auto const handler = AnyHandler{AccountInfoHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "actNotFound");
@@ -274,23 +279,23 @@ TEST_F(RPCAccountInfoHandlerTest, AccountNotExist)
 
 TEST_F(RPCAccountInfoHandlerTest, AccountInvalid)
 {
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, 30);
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, 30);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
 
-    ON_CALL(*backend, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
+    ON_CALL(*backend_, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
     // return a valid ledger object but not account root
-    ON_CALL(*backend, doFetchLedgerObject).WillByDefault(Return(CreateLegacyFeeSettingBlob(1, 2, 3, 4, 0)));
-    EXPECT_CALL(*backend, doFetchLedgerObject).Times(1);
+    ON_CALL(*backend_, doFetchLedgerObject).WillByDefault(Return(createLegacyFeeSettingBlob(1, 2, 3, 4, 0)));
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(1);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
             "account": "{}"
-        }})",
-        ACCOUNT
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{AccountInfoHandler{backend, mockAmendmentCenterPtr}};
+    auto const handler = AnyHandler{AccountInfoHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "dbDeserialization");
@@ -300,32 +305,32 @@ TEST_F(RPCAccountInfoHandlerTest, AccountInvalid)
 
 TEST_F(RPCAccountInfoHandlerTest, SignerListsInvalid)
 {
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, 30);
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, 30);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
 
-    ON_CALL(*backend, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
-    auto const account = GetAccountIDWithString(ACCOUNT);
+    ON_CALL(*backend_, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
+    auto const account = getAccountIdWithString(kACCOUNT);
     auto const accountKk = ripple::keylet::account(account).key;
-    auto const accountRoot = CreateAccountRootObject(ACCOUNT, 0, 2, 200, 2, INDEX1, 2);
-    ON_CALL(*backend, doFetchLedgerObject(accountKk, 30, _))
+    auto const accountRoot = createAccountRootObject(kACCOUNT, 0, 2, 200, 2, kINDEX1, 2);
+    ON_CALL(*backend_, doFetchLedgerObject(accountKk, 30, _))
         .WillByDefault(Return(accountRoot.getSerializer().peekData()));
     auto signersKey = ripple::keylet::signers(account).key;
-    ON_CALL(*backend, doFetchLedgerObject(signersKey, 30, _))
-        .WillByDefault(Return(CreateLegacyFeeSettingBlob(1, 2, 3, 4, 0)));
-    EXPECT_CALL(*mockAmendmentCenterPtr, isEnabled(_, Amendments::DisallowIncoming, _)).WillOnce(Return(false));
-    EXPECT_CALL(*mockAmendmentCenterPtr, isEnabled(_, Amendments::Clawback, _)).WillOnce(Return(false));
-    EXPECT_CALL(*backend, doFetchLedgerObject).Times(2);
+    ON_CALL(*backend_, doFetchLedgerObject(signersKey, 30, _))
+        .WillByDefault(Return(createLegacyFeeSettingBlob(1, 2, 3, 4, 0)));
+    EXPECT_CALL(*mockAmendmentCenterPtr_, isEnabled(_, Amendments::DisallowIncoming, _)).WillOnce(Return(false));
+    EXPECT_CALL(*mockAmendmentCenterPtr_, isEnabled(_, Amendments::Clawback, _)).WillOnce(Return(false));
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(2);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
             "account": "{}",
             "signer_lists": true
-        }})",
-        ACCOUNT
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{AccountInfoHandler{backend, mockAmendmentCenterPtr}};
+    auto const handler = AnyHandler{AccountInfoHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "dbDeserialization");
@@ -336,8 +341,8 @@ TEST_F(RPCAccountInfoHandlerTest, SignerListsInvalid)
 TEST_F(RPCAccountInfoHandlerTest, SignerListsTrueV2)
 {
     auto const expectedOutput = fmt::format(
-        R"({{
-            "account_data": 
+        R"JSON({{
+            "account_data":
             {{
                 "Account": "{}",
                 "Balance": "200",
@@ -380,7 +385,7 @@ TEST_F(RPCAccountInfoHandlerTest, SignerListsTrueV2)
                     "index": "A9C28A28B85CD533217F5C0A0C7767666B093FA58A0F2D80026FCC4CD932DDC7"
                 }}
             ],
-            "account_flags": 
+            "account_flags":
             {{
                 "defaultRipple": false,
                 "depositAuth": false,
@@ -395,40 +400,40 @@ TEST_F(RPCAccountInfoHandlerTest, SignerListsTrueV2)
             "ledger_hash": "{}",
             "ledger_index": 30,
             "validated": true
-        }})",
-        ACCOUNT,
-        INDEX1,
-        ACCOUNT1,
-        ACCOUNT2,
-        LEDGERHASH
+        }})JSON",
+        kACCOUNT,
+        kINDEX1,
+        kACCOUNT1,
+        kACCOUNT2,
+        kLEDGER_HASH
     );
 
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, 30);
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
-    ON_CALL(*backend, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, 30);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
+    ON_CALL(*backend_, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
 
-    auto const account = GetAccountIDWithString(ACCOUNT);
+    auto const account = getAccountIdWithString(kACCOUNT);
     auto const accountKk = ripple::keylet::account(account).key;
-    auto const accountRoot = CreateAccountRootObject(ACCOUNT, 0, 2, 200, 2, INDEX1, 2);
-    ON_CALL(*backend, doFetchLedgerObject(accountKk, 30, _))
+    auto const accountRoot = createAccountRootObject(kACCOUNT, 0, 2, 200, 2, kINDEX1, 2);
+    ON_CALL(*backend_, doFetchLedgerObject(accountKk, 30, _))
         .WillByDefault(Return(accountRoot.getSerializer().peekData()));
     auto signersKey = ripple::keylet::signers(account).key;
-    ON_CALL(*backend, doFetchLedgerObject(signersKey, 30, _))
-        .WillByDefault(Return(CreateSignerLists({{ACCOUNT1, 1}, {ACCOUNT2, 1}}).getSerializer().peekData()));
-    EXPECT_CALL(*mockAmendmentCenterPtr, isEnabled(_, Amendments::DisallowIncoming, _)).WillOnce(Return(false));
-    EXPECT_CALL(*mockAmendmentCenterPtr, isEnabled(_, Amendments::Clawback, _)).WillOnce(Return(false));
-    EXPECT_CALL(*backend, doFetchLedgerObject).Times(2);
+    ON_CALL(*backend_, doFetchLedgerObject(signersKey, 30, _))
+        .WillByDefault(Return(createSignerLists({{kACCOUNT1, 1}, {kACCOUNT2, 1}}).getSerializer().peekData()));
+    EXPECT_CALL(*mockAmendmentCenterPtr_, isEnabled(_, Amendments::DisallowIncoming, _)).WillOnce(Return(false));
+    EXPECT_CALL(*mockAmendmentCenterPtr_, isEnabled(_, Amendments::Clawback, _)).WillOnce(Return(false));
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(2);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
             "account": "{}",
             "signer_lists": true
-        }})",
-        ACCOUNT
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{AccountInfoHandler{backend, mockAmendmentCenterPtr}};
+    auto const handler = AnyHandler{AccountInfoHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{.yield = yield, .apiVersion = 2});
+        auto const output = handler.process(kINPUT, Context{.yield = yield, .apiVersion = 2});
         ASSERT_TRUE(output);
         EXPECT_EQ(*output.result, json::parse(expectedOutput));
     });
@@ -437,8 +442,8 @@ TEST_F(RPCAccountInfoHandlerTest, SignerListsTrueV2)
 TEST_F(RPCAccountInfoHandlerTest, SignerListsTrueV1)
 {
     auto const expectedOutput = fmt::format(
-        R"({{
-            "account_data": 
+        R"JSON({{
+            "account_data":
             {{
                 "Account": "{}",
                 "Balance": "200",
@@ -481,7 +486,7 @@ TEST_F(RPCAccountInfoHandlerTest, SignerListsTrueV1)
                     }}
                 ]
             }},
-            "account_flags": 
+            "account_flags":
             {{
                 "defaultRipple": false,
                 "depositAuth": false,
@@ -496,40 +501,40 @@ TEST_F(RPCAccountInfoHandlerTest, SignerListsTrueV1)
             "ledger_hash": "{}",
             "ledger_index": 30,
             "validated": true
-        }})",
-        ACCOUNT,
-        INDEX1,
-        ACCOUNT1,
-        ACCOUNT2,
-        LEDGERHASH
+        }})JSON",
+        kACCOUNT,
+        kINDEX1,
+        kACCOUNT1,
+        kACCOUNT2,
+        kLEDGER_HASH
     );
 
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, 30);
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
-    ON_CALL(*backend, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, 30);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
+    ON_CALL(*backend_, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
 
-    auto const account = GetAccountIDWithString(ACCOUNT);
+    auto const account = getAccountIdWithString(kACCOUNT);
     auto const accountKk = ripple::keylet::account(account).key;
-    auto const accountRoot = CreateAccountRootObject(ACCOUNT, 0, 2, 200, 2, INDEX1, 2);
-    ON_CALL(*backend, doFetchLedgerObject(accountKk, 30, _))
+    auto const accountRoot = createAccountRootObject(kACCOUNT, 0, 2, 200, 2, kINDEX1, 2);
+    ON_CALL(*backend_, doFetchLedgerObject(accountKk, 30, _))
         .WillByDefault(Return(accountRoot.getSerializer().peekData()));
     auto signersKey = ripple::keylet::signers(account).key;
-    ON_CALL(*backend, doFetchLedgerObject(signersKey, 30, _))
-        .WillByDefault(Return(CreateSignerLists({{ACCOUNT1, 1}, {ACCOUNT2, 1}}).getSerializer().peekData()));
-    EXPECT_CALL(*mockAmendmentCenterPtr, isEnabled(_, Amendments::DisallowIncoming, _)).WillOnce(Return(false));
-    EXPECT_CALL(*mockAmendmentCenterPtr, isEnabled(_, Amendments::Clawback, _)).WillOnce(Return(false));
-    EXPECT_CALL(*backend, doFetchLedgerObject).Times(2);
+    ON_CALL(*backend_, doFetchLedgerObject(signersKey, 30, _))
+        .WillByDefault(Return(createSignerLists({{kACCOUNT1, 1}, {kACCOUNT2, 1}}).getSerializer().peekData()));
+    EXPECT_CALL(*mockAmendmentCenterPtr_, isEnabled(_, Amendments::DisallowIncoming, _)).WillOnce(Return(false));
+    EXPECT_CALL(*mockAmendmentCenterPtr_, isEnabled(_, Amendments::Clawback, _)).WillOnce(Return(false));
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(2);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
             "account": "{}",
             "signer_lists": true
-        }})",
-        ACCOUNT
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{AccountInfoHandler{backend, mockAmendmentCenterPtr}};
+    auto const handler = AnyHandler{AccountInfoHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{.yield = yield, .apiVersion = 1});
+        auto const output = handler.process(kINPUT, Context{.yield = yield, .apiVersion = 1});
         ASSERT_TRUE(output);
         EXPECT_EQ(*output.result, json::parse(expectedOutput));
     });
@@ -538,7 +543,7 @@ TEST_F(RPCAccountInfoHandlerTest, SignerListsTrueV1)
 TEST_F(RPCAccountInfoHandlerTest, Flags)
 {
     auto const expectedOutput = fmt::format(
-        R"({{
+        R"JSON({{
             "account_data": {{
                 "Account": "{}",
                 "Balance": "200",
@@ -565,44 +570,44 @@ TEST_F(RPCAccountInfoHandlerTest, Flags)
             "ledger_hash": "{}",
             "ledger_index": 30,
             "validated": true
-        }})",
-        ACCOUNT,
-        INDEX1,
-        LEDGERHASH
+        }})JSON",
+        kACCOUNT,
+        kINDEX1,
+        kLEDGER_HASH
     );
 
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, 30);
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
-    ON_CALL(*backend, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, 30);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
+    ON_CALL(*backend_, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
 
-    auto const account = GetAccountIDWithString(ACCOUNT);
+    auto const account = getAccountIdWithString(kACCOUNT);
     auto const accountKk = ripple::keylet::account(account).key;
-    auto const accountRoot = CreateAccountRootObject(
-        ACCOUNT,
+    auto const accountRoot = createAccountRootObject(
+        kACCOUNT,
         ripple::lsfDefaultRipple | ripple::lsfGlobalFreeze | ripple::lsfRequireDestTag | ripple::lsfRequireAuth |
             ripple::lsfDepositAuth | ripple::lsfDisableMaster | ripple::lsfDisallowXRP | ripple::lsfNoFreeze |
             ripple::lsfPasswordSpent,
         2,
         200,
         2,
-        INDEX1,
+        kINDEX1,
         2
     );
-    ON_CALL(*backend, doFetchLedgerObject(accountKk, 30, _))
+    ON_CALL(*backend_, doFetchLedgerObject(accountKk, 30, _))
         .WillByDefault(Return(accountRoot.getSerializer().peekData()));
-    EXPECT_CALL(*mockAmendmentCenterPtr, isEnabled(_, Amendments::DisallowIncoming, _)).WillOnce(Return(false));
-    EXPECT_CALL(*mockAmendmentCenterPtr, isEnabled(_, Amendments::Clawback, _)).WillOnce(Return(false));
-    EXPECT_CALL(*backend, doFetchLedgerObject);
+    EXPECT_CALL(*mockAmendmentCenterPtr_, isEnabled(_, Amendments::DisallowIncoming, _)).WillOnce(Return(false));
+    EXPECT_CALL(*mockAmendmentCenterPtr_, isEnabled(_, Amendments::Clawback, _)).WillOnce(Return(false));
+    EXPECT_CALL(*backend_, doFetchLedgerObject);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
             "account": "{}"
-        }})",
-        ACCOUNT
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{AccountInfoHandler{backend, mockAmendmentCenterPtr}};
+    auto const handler = AnyHandler{AccountInfoHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_TRUE(output);
         EXPECT_EQ(*output.result, json::parse(expectedOutput));
     });
@@ -610,28 +615,28 @@ TEST_F(RPCAccountInfoHandlerTest, Flags)
 
 TEST_F(RPCAccountInfoHandlerTest, IdentAndSignerListsFalse)
 {
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, 30);
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
-    ON_CALL(*backend, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, 30);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
+    ON_CALL(*backend_, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
 
-    auto const account = GetAccountIDWithString(ACCOUNT);
+    auto const account = getAccountIdWithString(kACCOUNT);
     auto const accountKk = ripple::keylet::account(account).key;
-    auto const accountRoot = CreateAccountRootObject(ACCOUNT, 0, 2, 200, 2, INDEX1, 2);
-    ON_CALL(*backend, doFetchLedgerObject(accountKk, 30, _))
+    auto const accountRoot = createAccountRootObject(kACCOUNT, 0, 2, 200, 2, kINDEX1, 2);
+    ON_CALL(*backend_, doFetchLedgerObject(accountKk, 30, _))
         .WillByDefault(Return(accountRoot.getSerializer().peekData()));
-    EXPECT_CALL(*mockAmendmentCenterPtr, isEnabled(_, Amendments::DisallowIncoming, _)).WillOnce(Return(false));
-    EXPECT_CALL(*mockAmendmentCenterPtr, isEnabled(_, Amendments::Clawback, _)).WillOnce(Return(false));
-    EXPECT_CALL(*backend, doFetchLedgerObject);
+    EXPECT_CALL(*mockAmendmentCenterPtr_, isEnabled(_, Amendments::DisallowIncoming, _)).WillOnce(Return(false));
+    EXPECT_CALL(*mockAmendmentCenterPtr_, isEnabled(_, Amendments::Clawback, _)).WillOnce(Return(false));
+    EXPECT_CALL(*backend_, doFetchLedgerObject);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
             "ident": "{}"
-        }})",
-        ACCOUNT
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{AccountInfoHandler{backend, mockAmendmentCenterPtr}};
+    auto const handler = AnyHandler{AccountInfoHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_TRUE(output);
         EXPECT_FALSE(output.result->as_object().contains("signer_lists"));
     });
@@ -640,7 +645,7 @@ TEST_F(RPCAccountInfoHandlerTest, IdentAndSignerListsFalse)
 TEST_F(RPCAccountInfoHandlerTest, DisallowIncoming)
 {
     auto const expectedOutput = fmt::format(
-        R"({{
+        R"JSON({{
             "account_data": {{
                 "Account": "{}",
                 "Balance": "200",
@@ -671,20 +676,20 @@ TEST_F(RPCAccountInfoHandlerTest, DisallowIncoming)
             "ledger_hash": "{}",
             "ledger_index": 30,
             "validated": true
-        }})",
-        ACCOUNT,
-        INDEX1,
-        LEDGERHASH
+        }})JSON",
+        kACCOUNT,
+        kINDEX1,
+        kLEDGER_HASH
     );
 
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, 30);
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
-    ON_CALL(*backend, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, 30);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
+    ON_CALL(*backend_, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
 
-    auto const account = GetAccountIDWithString(ACCOUNT);
+    auto const account = getAccountIdWithString(kACCOUNT);
     auto const accountKk = ripple::keylet::account(account).key;
-    auto const accountRoot = CreateAccountRootObject(
-        ACCOUNT,
+    auto const accountRoot = createAccountRootObject(
+        kACCOUNT,
         ripple::lsfDefaultRipple | ripple::lsfGlobalFreeze | ripple::lsfRequireDestTag | ripple::lsfRequireAuth |
             ripple::lsfDepositAuth | ripple::lsfDisableMaster | ripple::lsfDisallowXRP | ripple::lsfNoFreeze |
             ripple::lsfPasswordSpent | ripple::lsfDisallowIncomingNFTokenOffer | ripple::lsfDisallowIncomingCheck |
@@ -692,24 +697,24 @@ TEST_F(RPCAccountInfoHandlerTest, DisallowIncoming)
         2,
         200,
         2,
-        INDEX1,
+        kINDEX1,
         2
     );
-    ON_CALL(*backend, doFetchLedgerObject(accountKk, 30, _))
+    ON_CALL(*backend_, doFetchLedgerObject(accountKk, 30, _))
         .WillByDefault(Return(accountRoot.getSerializer().peekData()));
-    EXPECT_CALL(*mockAmendmentCenterPtr, isEnabled(_, Amendments::DisallowIncoming, _)).WillOnce(Return(true));
-    EXPECT_CALL(*mockAmendmentCenterPtr, isEnabled(_, Amendments::Clawback, _)).WillOnce(Return(false));
-    EXPECT_CALL(*backend, doFetchLedgerObject);
+    EXPECT_CALL(*mockAmendmentCenterPtr_, isEnabled(_, Amendments::DisallowIncoming, _)).WillOnce(Return(true));
+    EXPECT_CALL(*mockAmendmentCenterPtr_, isEnabled(_, Amendments::Clawback, _)).WillOnce(Return(false));
+    EXPECT_CALL(*backend_, doFetchLedgerObject);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
             "account": "{}"
-        }})",
-        ACCOUNT
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{AccountInfoHandler{backend, mockAmendmentCenterPtr}};
+    auto const handler = AnyHandler{AccountInfoHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_TRUE(output);
         EXPECT_EQ(*output.result, json::parse(expectedOutput));
     });
@@ -718,7 +723,7 @@ TEST_F(RPCAccountInfoHandlerTest, DisallowIncoming)
 TEST_F(RPCAccountInfoHandlerTest, Clawback)
 {
     auto const expectedOutput = fmt::format(
-        R"({{
+        R"JSON({{
             "account_data": {{
                 "Account": "{}",
                 "Balance": "200",
@@ -746,44 +751,44 @@ TEST_F(RPCAccountInfoHandlerTest, Clawback)
             "ledger_hash": "{}",
             "ledger_index": 30,
             "validated": true
-        }})",
-        ACCOUNT,
-        INDEX1,
-        LEDGERHASH
+        }})JSON",
+        kACCOUNT,
+        kINDEX1,
+        kLEDGER_HASH
     );
 
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, 30);
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
-    ON_CALL(*backend, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, 30);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
+    ON_CALL(*backend_, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
 
-    auto const account = GetAccountIDWithString(ACCOUNT);
+    auto const account = getAccountIdWithString(kACCOUNT);
     auto const accountKk = ripple::keylet::account(account).key;
-    auto const accountRoot = CreateAccountRootObject(
-        ACCOUNT,
+    auto const accountRoot = createAccountRootObject(
+        kACCOUNT,
         ripple::lsfDefaultRipple | ripple::lsfGlobalFreeze | ripple::lsfRequireDestTag | ripple::lsfRequireAuth |
             ripple::lsfDepositAuth | ripple::lsfDisableMaster | ripple::lsfDisallowXRP | ripple::lsfNoFreeze |
             ripple::lsfPasswordSpent | ripple::lsfAllowTrustLineClawback,
         2,
         200,
         2,
-        INDEX1,
+        kINDEX1,
         2
     );
-    ON_CALL(*backend, doFetchLedgerObject(accountKk, 30, _))
+    ON_CALL(*backend_, doFetchLedgerObject(accountKk, 30, _))
         .WillByDefault(Return(accountRoot.getSerializer().peekData()));
-    EXPECT_CALL(*mockAmendmentCenterPtr, isEnabled(_, Amendments::DisallowIncoming, _)).WillOnce(Return(false));
-    EXPECT_CALL(*mockAmendmentCenterPtr, isEnabled(_, Amendments::Clawback, _)).WillOnce(Return(true));
-    EXPECT_CALL(*backend, doFetchLedgerObject);
+    EXPECT_CALL(*mockAmendmentCenterPtr_, isEnabled(_, Amendments::DisallowIncoming, _)).WillOnce(Return(false));
+    EXPECT_CALL(*mockAmendmentCenterPtr_, isEnabled(_, Amendments::Clawback, _)).WillOnce(Return(true));
+    EXPECT_CALL(*backend_, doFetchLedgerObject);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
             "account": "{}"
-        }})",
-        ACCOUNT
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{AccountInfoHandler{backend, mockAmendmentCenterPtr}};
+    auto const handler = AnyHandler{AccountInfoHandler{backend_, mockAmendmentCenterPtr_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_TRUE(output);
         EXPECT_EQ(*output.result, json::parse(expectedOutput));
     });
@@ -792,10 +797,10 @@ TEST_F(RPCAccountInfoHandlerTest, Clawback)
 TEST(RPCAccountInfoHandlerSpecTest, DeprecatedFields)
 {
     boost::json::value const json{
-        {"account", ACCOUNT},
-        {"ident", ACCOUNT},
+        {"account", kACCOUNT},
+        {"ident", kACCOUNT},
         {"ledger_index", 30},
-        {"ledger_hash", LEDGERHASH},
+        {"ledger_hash", kLEDGER_HASH},
         {"ledger", "some"},
         {"strict", true}
     };
@@ -807,7 +812,7 @@ TEST(RPCAccountInfoHandlerSpecTest, DeprecatedFields)
     auto const obj = warning.as_object();
     ASSERT_TRUE(obj.contains("id"));
     ASSERT_TRUE(obj.contains("message"));
-    EXPECT_EQ(obj.at("id").as_int64(), static_cast<int64_t>(WarningCode::warnRPC_DEPRECATED));
+    EXPECT_EQ(obj.at("id").as_int64(), static_cast<int64_t>(WarningCode::WarnRpcDeprecated));
     auto const& message = obj.at("message").as_string();
     for (auto const& field : {"ident", "ledger", "strict"}) {
         EXPECT_NE(message.find(fmt::format("Field '{}' is deprecated", field)), std::string::npos) << message;

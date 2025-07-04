@@ -19,6 +19,7 @@
 
 #include "rpc/handlers/Subscribe.hpp"
 
+#include "data/AmendmentCenterInterface.hpp"
 #include "data/BackendInterface.hpp"
 #include "data/Types.hpp"
 #include "feed/SubscriptionManagerInterface.hpp"
@@ -48,23 +49,23 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <variant>
 #include <vector>
 
 namespace rpc {
 
 SubscribeHandler::SubscribeHandler(
     std::shared_ptr<BackendInterface> const& sharedPtrBackend,
+    std::shared_ptr<data::AmendmentCenterInterface const> const& amendmentCenter,
     std::shared_ptr<feed::SubscriptionManagerInterface> const& subscriptions
 )
-    : sharedPtrBackend_(sharedPtrBackend), subscriptions_(subscriptions)
+    : sharedPtrBackend_(sharedPtrBackend), amendmentCenter_(amendmentCenter), subscriptions_(subscriptions)
 {
 }
 
 RpcSpecConstRef
 SubscribeHandler::spec([[maybe_unused]] uint32_t apiVersion)
 {
-    static auto const booksValidator =
+    static auto const kBOOKS_VALIDATOR =
         validation::CustomValidator{[](boost::json::value const& value, std::string_view key) -> MaybeError {
             if (!value.is_array())
                 return Error{Status{RippledError::rpcINVALID_PARAMS, std::string(key) + "NotArray"}};
@@ -81,7 +82,7 @@ SubscribeHandler::spec([[maybe_unused]] uint32_t apiVersion)
 
                 if (book.as_object().contains("taker")) {
                     if (auto err = meta::WithCustomError(
-                                       validation::CustomValidators::AccountValidator,
+                                       validation::CustomValidators::accountValidator,
                                        Status{RippledError::rpcBAD_ISSUER, "Issuer account malformed."}
                         )
                                        .verify(book.as_object(), "taker");
@@ -90,24 +91,24 @@ SubscribeHandler::spec([[maybe_unused]] uint32_t apiVersion)
                 }
 
                 auto const parsedBook = parseBook(book.as_object());
-                if (auto const status = std::get_if<Status>(&parsedBook))
-                    return Error(*status);
+                if (!parsedBook)
+                    return Error(parsedBook.error());
             }
 
             return MaybeError{};
         }};
 
-    static auto const rpcSpec = RpcSpec{
-        {JS(streams), validation::CustomValidators::SubscribeStreamValidator},
-        {JS(accounts), validation::CustomValidators::SubscribeAccountsValidator},
-        {JS(accounts_proposed), validation::CustomValidators::SubscribeAccountsValidator},
-        {JS(books), booksValidator},
+    static auto const kRPC_SPEC = RpcSpec{
+        {JS(streams), validation::CustomValidators::subscribeStreamValidator},
+        {JS(accounts), validation::CustomValidators::subscribeAccountsValidator},
+        {JS(accounts_proposed), validation::CustomValidators::subscribeAccountsValidator},
+        {JS(books), kBOOKS_VALIDATOR},
         {"user", check::Deprecated{}},
         {JS(password), check::Deprecated{}},
         {JS(rt_accounts), check::Deprecated{}}
     };
 
-    return rpcSpec;
+    return kRPC_SPEC;
 }
 
 SubscribeHandler::Result
@@ -196,7 +197,7 @@ SubscribeHandler::subscribeToBooks(
     Output& output
 ) const
 {
-    static auto constexpr fetchLimit = 200;
+    static constexpr auto kFETCH_LIMIT = 200;
 
     std::optional<data::LedgerRange> rng;
 
@@ -210,14 +211,15 @@ SubscribeHandler::subscribeToBooks(
             auto const getOrderBook = [&](auto const& book, auto& snapshots) {
                 auto const bookBase = getBookBase(book);
                 auto const [offers, _] =
-                    sharedPtrBackend_->fetchBookOffers(bookBase, rng->maxSequence, fetchLimit, yield);
+                    sharedPtrBackend_->fetchBookOffers(bookBase, rng->maxSequence, kFETCH_LIMIT, yield);
 
-                // the taker is not really uesed, same issue with
+                // the taker is not really used, same issue with
                 // https://github.com/XRPLF/xrpl-dev-portal/issues/1818
                 auto const takerID = internalBook.taker ? accountFromStringStrict(*(internalBook.taker)) : beast::zero;
 
-                auto const orderBook =
-                    postProcessOrderBook(offers, book, *takerID, *sharedPtrBackend_, rng->maxSequence, yield);
+                auto const orderBook = postProcessOrderBook(
+                    offers, book, *takerID, *sharedPtrBackend_, *amendmentCenter_, rng->maxSequence, yield
+                );
                 std::copy(orderBook.begin(), orderBook.end(), std::back_inserter(snapshots));
             };
 
@@ -285,17 +287,18 @@ tag_invoke(boost::json::value_to_tag<SubscribeHandler::Input>, boost::json::valu
             auto internalBook = SubscribeHandler::OrderBook{};
             auto const& bookObject = book.as_object();
 
-            if (auto const& taker = bookObject.find(JS(taker)); taker != bookObject.end())
+            if (auto const taker = bookObject.find(JS(taker)); taker != bookObject.end())
                 internalBook.taker = boost::json::value_to<std::string>(taker->value());
 
-            if (auto const& both = bookObject.find(JS(both)); both != bookObject.end())
+            if (auto const both = bookObject.find(JS(both)); both != bookObject.end())
                 internalBook.both = both->value().as_bool();
 
-            if (auto const& snapshot = bookObject.find(JS(snapshot)); snapshot != bookObject.end())
+            if (auto const snapshot = bookObject.find(JS(snapshot)); snapshot != bookObject.end())
                 internalBook.snapshot = snapshot->value().as_bool();
 
             auto const parsedBookMaybe = parseBook(book.as_object());
-            internalBook.book = std::get<ripple::Book>(parsedBookMaybe);
+            ASSERT(parsedBookMaybe.has_value(), "Book parsing failed");
+            internalBook.book = parsedBookMaybe.value();
             input.books->push_back(internalBook);
         }
     }

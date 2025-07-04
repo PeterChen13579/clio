@@ -30,7 +30,7 @@ using namespace data::cassandra::impl;
 using namespace testing;
 
 struct BackendCassandraRetryPolicyTest : SyncAsioContextTest {
-    ExponentialBackoffRetryPolicy retryPolicy{ctx};
+    ExponentialBackoffRetryPolicy retryPolicy{ctx_};
 };
 
 TEST_F(BackendCassandraRetryPolicyTest, ShouldRetryAlwaysTrue)
@@ -57,7 +57,7 @@ TEST_F(BackendCassandraRetryPolicyTest, RetryCorrectlyExecuted)
     }
 }
 
-TEST_F(BackendCassandraRetryPolicyTest, MutlipleRetryCancelPreviousCalls)
+TEST_F(BackendCassandraRetryPolicyTest, MultipleRetryCancelPreviousCalls)
 {
     StrictMock<MockFunction<void()>> callback;
     EXPECT_CALL(callback, Call());

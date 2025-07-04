@@ -21,6 +21,8 @@
 
 #include "data/BackendInterface.hpp"
 #include "data/DBHelpers.hpp"
+#include "etlng/ETLServiceInterface.hpp"
+#include "etlng/LoadBalancerInterface.hpp"
 #include "feed/SubscriptionManagerInterface.hpp"
 #include "rpc/Errors.hpp"
 #include "rpc/JS.hpp"
@@ -49,10 +51,6 @@
 #include <optional>
 #include <string>
 
-namespace etl {
-class ETLService;
-class LoadBalancer;
-}  // namespace etl
 namespace rpc {
 class Counters;
 }  // namespace rpc
@@ -62,18 +60,16 @@ namespace rpc {
 /**
  * @brief Contains common functionality for handling the `server_info` command
  *
- * @tparam LoadBalancerType The type of the load balancer
- * @tparam ETLServiceType The type of the ETL service
  * @tparam CountersType The type of the counters
  */
-template <typename LoadBalancerType, typename ETLServiceType, typename CountersType>
+template <typename CountersType>
 class BaseServerInfoHandler {
-    static constexpr auto BACKEND_COUNTERS_KEY = "backend_counters";
+    static constexpr auto kBACKEND_COUNTERS_KEY = "backend_counters";
 
     std::shared_ptr<BackendInterface> backend_;
     std::shared_ptr<feed::SubscriptionManagerInterface> subscriptions_;
-    std::shared_ptr<LoadBalancerType> balancer_;
-    std::shared_ptr<ETLServiceType const> etl_;
+    std::shared_ptr<etlng::LoadBalancerInterface> balancer_;
+    std::shared_ptr<etlng::ETLServiceInterface const> etl_;
     std::reference_wrapper<CountersType const> counters_;
 
 public:
@@ -158,8 +154,8 @@ public:
     BaseServerInfoHandler(
         std::shared_ptr<BackendInterface> const& backend,
         std::shared_ptr<feed::SubscriptionManagerInterface> const& subscriptions,
-        std::shared_ptr<LoadBalancerType> const& balancer,
-        std::shared_ptr<ETLServiceType const> const& etl,
+        std::shared_ptr<etlng::LoadBalancerInterface> const& balancer,
+        std::shared_ptr<etlng::ETLServiceInterface const> const& etl,
         CountersType const& counters
     )
         : backend_(backend)
@@ -179,8 +175,8 @@ public:
     static RpcSpecConstRef
     spec([[maybe_unused]] uint32_t apiVersion)
     {
-        static RpcSpec const rpcSpec = {};
-        return rpcSpec;
+        static RpcSpec const kRPC_SPEC = {};
+        return kRPC_SPEC;
     }
 
     /**
@@ -211,7 +207,7 @@ public:
         auto const sinceEpoch = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
         auto const age = static_cast<int32_t>(sinceEpoch) -
             static_cast<int32_t>(lgrInfo->closeTime.time_since_epoch().count()) -
-            static_cast<int32_t>(rippleEpochStart);
+            static_cast<int32_t>(kRIPPLE_EPOCH_START);
 
         output.info.completeLedgers = fmt::format("{}-{}", range->minSequence, range->maxSequence);
 
@@ -304,7 +300,7 @@ private:
             jv.as_object()[JS(counters)] = info.adminSection->counters;
             jv.as_object()[JS(counters)].as_object()["subscriptions"] = info.adminSection->subscriptions;
             if (info.adminSection->backendCounters.has_value()) {
-                jv.as_object()[BACKEND_COUNTERS_KEY] = *info.adminSection->backendCounters;
+                jv.as_object()[kBACKEND_COUNTERS_KEY] = *info.adminSection->backendCounters;
             }
         }
     }
@@ -340,8 +336,8 @@ private:
     {
         auto input = BaseServerInfoHandler::Input{};
         auto const jsonObject = jv.as_object();
-        if (jsonObject.contains(BACKEND_COUNTERS_KEY) && jsonObject.at(BACKEND_COUNTERS_KEY).is_bool())
-            input.backendCounters = jv.at(BACKEND_COUNTERS_KEY).as_bool();
+        if (jsonObject.contains(kBACKEND_COUNTERS_KEY) && jsonObject.at(kBACKEND_COUNTERS_KEY).is_bool())
+            input.backendCounters = jv.at(kBACKEND_COUNTERS_KEY).as_bool();
         return input;
     }
 };
@@ -352,6 +348,6 @@ private:
  *
  * For more details see: https://xrpl.org/server_info-clio.html
  */
-using ServerInfoHandler = BaseServerInfoHandler<etl::LoadBalancer, etl::ETLService, Counters>;
+using ServerInfoHandler = BaseServerInfoHandler<Counters>;
 
 }  // namespace rpc

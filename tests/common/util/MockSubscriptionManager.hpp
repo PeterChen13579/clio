@@ -49,14 +49,14 @@ struct MockSubscriptionManager : feed::SubscriptionManagerInterface {
         void,
         pubLedger,
         (ripple::LedgerHeader const&, ripple::Fees const&, std::string const&, std::uint32_t),
-        (const, override)
+        (override)
     );
 
     MOCK_METHOD(
         void,
         pubBookChanges,
         (ripple::LedgerHeader const&, std::vector<data::TransactionAndMetadata> const&),
-        (const, override)
+        (override)
     );
 
     MOCK_METHOD(void, unsubLedger, (feed::SubscriberSharedPtr const&), (override));
@@ -89,9 +89,9 @@ struct MockSubscriptionManager : feed::SubscriptionManagerInterface {
 
     MOCK_METHOD(void, forwardProposedTransaction, (boost::json::object const&), (override));
 
-    MOCK_METHOD(void, forwardManifest, (boost::json::object const&), (const, override));
+    MOCK_METHOD(void, forwardManifest, (boost::json::object const&), (override));
 
-    MOCK_METHOD(void, forwardValidation, (boost::json::object const&), (const, override));
+    MOCK_METHOD(void, forwardValidation, (boost::json::object const&), (override));
 
     MOCK_METHOD(void, subProposedAccount, (ripple::AccountID const&, feed::SubscriberSharedPtr const&), (override));
 
@@ -102,6 +102,12 @@ struct MockSubscriptionManager : feed::SubscriptionManagerInterface {
     MOCK_METHOD(void, unsubProposedTransactions, (feed::SubscriberSharedPtr const&), (override));
 
     MOCK_METHOD(boost::json::object, report, (), (const, override));
+
+    MOCK_METHOD(void, setNetworkID, (uint32_t), (override));
+
+    MOCK_METHOD(uint32_t, getNetworkID, (), (const, override));
+
+    MOCK_METHOD(void, stop, (), (override));
 };
 
 template <template <typename> typename MockType = ::testing::NiceMock>

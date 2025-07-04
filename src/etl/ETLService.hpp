@@ -20,10 +20,8 @@
 #pragma once
 
 #include "data/BackendInterface.hpp"
-#include "data/LedgerCache.hpp"
 #include "etl/CacheLoader.hpp"
 #include "etl/ETLState.hpp"
-#include "etl/LoadBalancer.hpp"
 #include "etl/NetworkValidatedLedgersInterface.hpp"
 #include "etl/SystemState.hpp"
 #include "etl/impl/AmendmentBlockHandler.hpp"
@@ -33,7 +31,12 @@
 #include "etl/impl/LedgerLoader.hpp"
 #include "etl/impl/LedgerPublisher.hpp"
 #include "etl/impl/Transformer.hpp"
+#include "etlng/ETLServiceInterface.hpp"
+#include "etlng/LoadBalancerInterface.hpp"
+#include "etlng/impl/LedgerPublisher.hpp"
+#include "etlng/impl/TaskManagerProvider.hpp"
 #include "feed/SubscriptionManagerInterface.hpp"
+#include "util/async/AnyExecutionContext.hpp"
 #include "util/log/Logger.hpp"
 
 #include <boost/asio/io_context.hpp>
@@ -59,6 +62,16 @@ struct NFTsData;
 namespace etl {
 
 /**
+ * @brief A tag class to help identify ETLService in templated code.
+ */
+struct ETLServiceTag {
+    virtual ~ETLServiceTag() = default;
+};
+
+template <typename T>
+concept SomeETLService = std::derived_from<T, ETLServiceTag>;
+
+/**
  * @brief This class is responsible for continuously extracting data from a p2p node, and writing that data to the
  * databases.
  *
@@ -71,16 +84,14 @@ namespace etl {
  * the others will fall back to monitoring/publishing. In this sense, this class dynamically transitions from monitoring
  * to writing and from writing to monitoring, based on the activity of other processes running on different machines.
  */
-class ETLService {
+class ETLService : public etlng::ETLServiceInterface, ETLServiceTag {
     // TODO: make these template parameters in ETLService
-    using LoadBalancerType = LoadBalancer;
     using DataPipeType = etl::impl::ExtractionDataPipe<org::xrpl::rpc::v1::GetLedgerResponse>;
-    using CacheType = data::LedgerCache;
-    using CacheLoaderType = etl::CacheLoader<CacheType>;
-    using LedgerFetcherType = etl::impl::LedgerFetcher<LoadBalancerType>;
+    using CacheLoaderType = etl::CacheLoader<>;
+    using LedgerFetcherType = etl::impl::LedgerFetcher;
     using ExtractorType = etl::impl::Extractor<DataPipeType, LedgerFetcherType>;
-    using LedgerLoaderType = etl::impl::LedgerLoader<LoadBalancerType, LedgerFetcherType>;
-    using LedgerPublisherType = etl::impl::LedgerPublisher<CacheType>;
+    using LedgerLoaderType = etl::impl::LedgerLoader<LedgerFetcherType>;
+    using LedgerPublisherType = etl::impl::LedgerPublisher;
     using AmendmentBlockHandlerType = etl::impl::AmendmentBlockHandler;
     using TransformerType =
         etl::impl::Transformer<DataPipeType, LedgerLoaderType, LedgerPublisherType, AmendmentBlockHandlerType>;
@@ -88,7 +99,7 @@ class ETLService {
     util::Logger log_{"ETL"};
 
     std::shared_ptr<BackendInterface> backend_;
-    std::shared_ptr<LoadBalancerType> loadBalancer_;
+    std::shared_ptr<etlng::LoadBalancerInterface> loadBalancer_;
     std::shared_ptr<NetworkValidatedLedgersInterface> networkValidatedLedgers_;
 
     std::uint32_t extractorThreads_ = 1;
@@ -105,7 +116,6 @@ class ETLService {
     size_t numMarkers_ = 2;
     std::optional<uint32_t> startSequence_;
     std::optional<uint32_t> finishSequence_;
-    size_t txnThreshold_ = 0;
 
 public:
     /**
@@ -123,9 +133,14 @@ public:
         boost::asio::io_context& ioc,
         std::shared_ptr<BackendInterface> backend,
         std::shared_ptr<feed::SubscriptionManagerInterface> subscriptions,
-        std::shared_ptr<LoadBalancerType> balancer,
+        std::shared_ptr<etlng::LoadBalancerInterface> balancer,
         std::shared_ptr<NetworkValidatedLedgersInterface> ledgers
     );
+
+    /**
+     * @brief Move constructor is deleted because ETL service shares its fields by reference
+     */
+    ETLService(ETLService&&) = delete;
 
     /**
      * @brief A factory function to spawn new ETLService instances.
@@ -134,35 +149,41 @@ public:
      *
      * @param config The configuration to use
      * @param ioc io context to run on
+     * @param ctx Execution context for asynchronous operations
      * @param backend BackendInterface implementation
      * @param subscriptions Subscription manager
      * @param balancer Load balancer to use
      * @param ledgers The network validated ledgers datastructure
      * @return A shared pointer to a new instance of ETLService
      */
-    static std::shared_ptr<ETLService>
-    make_ETLService(
+    static std::shared_ptr<etlng::ETLServiceInterface>
+    makeETLService(
         util::config::ClioConfigDefinition const& config,
         boost::asio::io_context& ioc,
+        util::async::AnyExecutionContext ctx,
         std::shared_ptr<BackendInterface> backend,
         std::shared_ptr<feed::SubscriptionManagerInterface> subscriptions,
-        std::shared_ptr<LoadBalancerType> balancer,
+        std::shared_ptr<etlng::LoadBalancerInterface> balancer,
         std::shared_ptr<NetworkValidatedLedgersInterface> ledgers
-    )
-    {
-        auto etl = std::make_shared<ETLService>(config, ioc, backend, subscriptions, balancer, ledgers);
-        etl->run();
-
-        return etl;
-    }
+    );
 
     /**
      * @brief Stops components and joins worker thread.
      */
-    ~ETLService()
+    ~ETLService() override
     {
-        LOG(log_.info()) << "onStop called";
-        LOG(log_.debug()) << "Stopping Reporting ETL";
+        if (not state_.isStopping)
+            stop();
+    }
+
+    /**
+     * @brief Stop the ETL service.
+     * @note This method blocks until the ETL service has stopped.
+     */
+    void
+    stop() override
+    {
+        LOG(log_.info()) << "Stop called";
 
         state_.isStopping = true;
         cacheLoader_.stop();
@@ -179,7 +200,7 @@ public:
      * @return Time passed since last ledger close
      */
     std::uint32_t
-    lastCloseAgeSeconds() const
+    lastCloseAgeSeconds() const override
     {
         return ledgerPublisher_.lastCloseAgeSeconds();
     }
@@ -190,7 +211,7 @@ public:
      * @return true if currently amendment blocked; false otherwise
      */
     bool
-    isAmendmentBlocked() const
+    isAmendmentBlocked() const override
     {
         return state_.isAmendmentBlocked;
     }
@@ -201,7 +222,7 @@ public:
      * @return true if corruption of DB was detected and cache was stopped.
      */
     bool
-    isCorruptionDetected() const
+    isCorruptionDetected() const override
     {
         return state_.isCorruptionDetected;
     }
@@ -212,13 +233,13 @@ public:
      * @return The state of ETL as a JSON object
      */
     boost::json::object
-    getInfo() const
+    getInfo() const override
     {
         boost::json::object result;
 
         result["etl_sources"] = loadBalancer_->toJson();
         result["is_writer"] = static_cast<int>(state_.isWriting);
-        result["read_only"] = static_cast<int>(state_.isReadOnly);
+        result["read_only"] = static_cast<int>(state_.isStrictReadonly);
         auto last = ledgerPublisher_.getLastPublish();
         if (last.time_since_epoch().count() != 0)
             result["last_publish_age_seconds"] = std::to_string(ledgerPublisher_.lastPublishAgeSeconds());
@@ -230,10 +251,16 @@ public:
      * @return The etl nodes' state, nullopt if etl nodes are not connected
      */
     std::optional<etl::ETLState>
-    getETLState() const noexcept
+    getETLState() const noexcept override
     {
         return loadBalancer_->getETLState();
     }
+
+    /**
+     * @brief Start all components to run ETL service.
+     */
+    void
+    run() override;
 
 private:
     /**
@@ -291,7 +318,7 @@ private:
     /**
      * @brief Get the number of markers to use during the initial ledger download.
      *
-     * This is equivelent to the degree of parallelism during the initial ledger download.
+     * This is equivalent to the degree of parallelism during the initial ledger download.
      *
      * @return The number of markers
      */
@@ -300,12 +327,6 @@ private:
     {
         return numMarkers_;
     }
-
-    /**
-     * @brief Start all components to run ETL service.
-     */
-    void
-    run();
 
     /**
      * @brief Spawn the worker thread and start monitoring.

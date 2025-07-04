@@ -39,21 +39,27 @@
 #include <vector>
 
 using namespace rpc;
+using namespace data;
 namespace json = boost::json;
 using namespace testing;
 
-constexpr static auto CURRENCY = "0158415500000000C1F76FF6ECB0BAC600000000";
-constexpr static auto ISSUER = "rK9DrarGKnVEo2nYp5MfVRXRYf5yRX3mwD";
-constexpr static auto ACCOUNT1 = "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn";
-constexpr static auto ACCOUNT2 = "rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun";
-constexpr static auto LEDGERHASH = "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652";
-constexpr static auto MAXSEQ = 30;
-constexpr static auto MINSEQ = 10;
+namespace {
+
+constexpr auto kCURRENCY = "0158415500000000C1F76FF6ECB0BAC600000000";
+constexpr auto kISSUER = "rK9DrarGKnVEo2nYp5MfVRXRYf5yRX3mwD";
+constexpr auto kACCOUNT1 = "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn";
+constexpr auto kACCOUNT2 = "rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun";
+constexpr auto kLEDGER_HASH = "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652";
+constexpr auto kDOMAIN = "F10D0CC9A0F9A3CBF585B80BE09A186483668FDBDD39AA7E3370F3649CE134E5";
+constexpr auto kMAX_SEQ = 30;
+constexpr auto kMIN_SEQ = 10;
+
+}  // namespace
 
 struct RPCBookChangesHandlerTest : HandlerBaseTest {
     RPCBookChangesHandlerTest()
     {
-        backend->setRange(MINSEQ, MAXSEQ);
+        backend_->setRange(kMIN_SEQ, kMAX_SEQ);
     }
 };
 
@@ -74,19 +80,19 @@ generateTestValuesForParametersTest()
     return std::vector<BookChangesParamTestCaseBundle>{
         BookChangesParamTestCaseBundle{
             .testName = "LedgerHashInvalid",
-            .testJson = R"({"ledger_hash":"1"})",
+            .testJson = R"JSON({"ledger_hash": "1"})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "ledger_hashMalformed"
         },
         BookChangesParamTestCaseBundle{
             .testName = "LedgerHashNotString",
-            .testJson = R"({"ledger_hash":1})",
+            .testJson = R"JSON({"ledger_hash": 1})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "ledger_hashNotString"
         },
         BookChangesParamTestCaseBundle{
             .testName = "LedgerIndexInvalid",
-            .testJson = R"({"ledger_index":"a"})",
+            .testJson = R"JSON({"ledger_index": "a"})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "ledgerIndexMalformed"
         },
@@ -97,14 +103,14 @@ INSTANTIATE_TEST_CASE_P(
     RPCBookChangesGroup1,
     BookChangesParameterTest,
     ValuesIn(generateTestValuesForParametersTest()),
-    tests::util::NameGenerator
+    tests::util::kNAME_GENERATOR
 );
 
 TEST_P(BookChangesParameterTest, InvalidParams)
 {
     auto const testBundle = GetParam();
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{BookChangesHandler{backend}};
+        auto const handler = AnyHandler{BookChangesHandler{backend_}};
         auto const req = json::parse(testBundle.testJson);
         auto const output = handler.process(req, Context{yield});
         ASSERT_FALSE(output);
@@ -116,14 +122,14 @@ TEST_P(BookChangesParameterTest, InvalidParams)
 
 TEST_F(RPCBookChangesHandlerTest, LedgerNonExistViaIntSequence)
 {
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence);
     // return empty ledgerHeader
-    ON_CALL(*backend, fetchLedgerBySequence(MAXSEQ, _)).WillByDefault(Return(std::optional<ripple::LedgerHeader>{}));
+    ON_CALL(*backend_, fetchLedgerBySequence(kMAX_SEQ, _)).WillByDefault(Return(std::optional<ripple::LedgerHeader>{}));
 
-    auto static const input = json::parse(R"({"ledger_index":30})");
-    auto const handler = AnyHandler{BookChangesHandler{backend}};
+    static auto const kINPUT = json::parse(R"JSON({"ledger_index": 30})JSON");
+    auto const handler = AnyHandler{BookChangesHandler{backend_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "lgrNotFound");
@@ -133,14 +139,14 @@ TEST_F(RPCBookChangesHandlerTest, LedgerNonExistViaIntSequence)
 
 TEST_F(RPCBookChangesHandlerTest, LedgerNonExistViaStringSequence)
 {
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence);
     // return empty ledgerHeader
-    ON_CALL(*backend, fetchLedgerBySequence(MAXSEQ, _)).WillByDefault(Return(std::nullopt));
+    ON_CALL(*backend_, fetchLedgerBySequence(kMAX_SEQ, _)).WillByDefault(Return(std::nullopt));
 
-    auto static const input = json::parse(R"({"ledger_index":"30"})");
-    auto const handler = AnyHandler{BookChangesHandler{backend}};
+    static auto const kINPUT = json::parse(R"JSON({"ledger_index": "30"})JSON");
+    auto const handler = AnyHandler{BookChangesHandler{backend_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "lgrNotFound");
@@ -150,20 +156,19 @@ TEST_F(RPCBookChangesHandlerTest, LedgerNonExistViaStringSequence)
 
 TEST_F(RPCBookChangesHandlerTest, LedgerNonExistViaHash)
 {
-    EXPECT_CALL(*backend, fetchLedgerByHash).Times(1);
     // return empty ledgerHeader
-    ON_CALL(*backend, fetchLedgerByHash(ripple::uint256{LEDGERHASH}, _))
-        .WillByDefault(Return(std::optional<ripple::LedgerHeader>{}));
+    EXPECT_CALL(*backend_, fetchLedgerByHash(ripple::uint256{kLEDGER_HASH}, _))
+        .WillOnce(Return(std::optional<ripple::LedgerHeader>{}));
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
-            "ledger_hash":"{}"
-        }})",
-        LEDGERHASH
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
+            "ledger_hash": "{}"
+        }})JSON",
+        kLEDGER_HASH
     ));
-    auto const handler = AnyHandler{BookChangesHandler{backend}};
+    auto const handler = AnyHandler{BookChangesHandler{backend_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "lgrNotFound");
@@ -173,46 +178,91 @@ TEST_F(RPCBookChangesHandlerTest, LedgerNonExistViaHash)
 
 TEST_F(RPCBookChangesHandlerTest, NormalPath)
 {
-    static auto constexpr expectedOut =
-        R"({
-            "type":"bookChanges",
-            "ledger_hash":"4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652",
-            "ledger_index":30,
-            "ledger_time":0,
-            "validated":true,
-            "changes":[
+    static constexpr auto kEXPECTED_OUT =
+        R"JSON({
+            "type": "bookChanges",
+            "ledger_hash": "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652",
+            "ledger_index": 30,
+            "ledger_time": 0,
+            "validated": true,
+            "changes": [
                 {
-                    "currency_a":"XRP_drops",
-                    "currency_b":"rK9DrarGKnVEo2nYp5MfVRXRYf5yRX3mwD/0158415500000000C1F76FF6ECB0BAC600000000",
-                    "volume_a":"2",
-                    "volume_b":"2",
-                    "high":"-1",
-                    "low":"-1",
-                    "open":"-1",
-                    "close":"-1"
+                    "currency_a": "XRP_drops",
+                    "currency_b": "rK9DrarGKnVEo2nYp5MfVRXRYf5yRX3mwD/0158415500000000C1F76FF6ECB0BAC600000000",
+                    "volume_a": "2",
+                    "volume_b": "2",
+                    "high": "-1",
+                    "low": "-1",
+                    "open": "-1",
+                    "close": "-1"
                 }
             ]
-        })";
+        })JSON";
 
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
-    ON_CALL(*backend, fetchLedgerBySequence(MAXSEQ, _)).WillByDefault(Return(CreateLedgerHeader(LEDGERHASH, MAXSEQ)));
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kMAX_SEQ, _))
+        .WillOnce(Return(createLedgerHeader(kLEDGER_HASH, kMAX_SEQ)));
 
     auto transactions = std::vector<TransactionAndMetadata>{};
     auto trans1 = TransactionAndMetadata();
-    ripple::STObject const obj = CreatePaymentTransactionObject(ACCOUNT1, ACCOUNT2, 1, 1, 32);
+    ripple::STObject const obj = createPaymentTransactionObject(kACCOUNT1, kACCOUNT2, 1, 1, 32);
     trans1.transaction = obj.getSerializer().peekData();
     trans1.ledgerSequence = 32;
-    ripple::STObject const metaObj = CreateMetaDataForBookChange(CURRENCY, ISSUER, 22, 1, 3, 3, 1);
+    ripple::STObject const metaObj = createMetaDataForBookChange(kCURRENCY, kISSUER, 22, 1, 3, 3, 1);
     trans1.metadata = metaObj.getSerializer().peekData();
     transactions.push_back(trans1);
 
-    EXPECT_CALL(*backend, fetchAllTransactionsInLedger).Times(1);
-    ON_CALL(*backend, fetchAllTransactionsInLedger(MAXSEQ, _)).WillByDefault(Return(transactions));
+    EXPECT_CALL(*backend_, fetchAllTransactionsInLedger(kMAX_SEQ, _)).WillOnce(Return(transactions));
 
-    auto const handler = AnyHandler{BookChangesHandler{backend}};
+    auto const handler = AnyHandler{BookChangesHandler{backend_}};
     runSpawn([&](auto yield) {
         auto const output = handler.process(json::parse("{}"), Context{yield});
         ASSERT_TRUE(output);
-        EXPECT_EQ(*output.result, json::parse(expectedOut));
+        EXPECT_EQ(*output.result, json::parse(kEXPECTED_OUT));
+    });
+}
+
+TEST_F(RPCBookChangesHandlerTest, NormalPathWithDomain)
+{
+    static constexpr auto kEXPECTED_OUT =
+        R"JSON({
+            "type": "bookChanges",
+            "ledger_hash": "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652",
+            "ledger_index": 30,
+            "ledger_time": 0,
+            "validated": true,
+            "changes": [
+                {
+                    "currency_a": "XRP_drops",
+                    "currency_b": "rK9DrarGKnVEo2nYp5MfVRXRYf5yRX3mwD/0158415500000000C1F76FF6ECB0BAC600000000",
+                    "volume_a": "2",
+                    "volume_b": "2",
+                    "high": "-1",
+                    "low": "-1",
+                    "open": "-1",
+                    "close": "-1",
+                    "domain": "F10D0CC9A0F9A3CBF585B80BE09A186483668FDBDD39AA7E3370F3649CE134E5"
+                }
+            ]
+        })JSON";
+
+    EXPECT_CALL(*backend_, fetchLedgerBySequence(kMAX_SEQ, _))
+        .WillOnce(Return(createLedgerHeader(kLEDGER_HASH, kMAX_SEQ)));
+
+    auto transactions = std::vector<TransactionAndMetadata>{};
+    auto trans1 = TransactionAndMetadata();
+    ripple::STObject const obj = createPaymentTransactionObject(kACCOUNT1, kACCOUNT2, 1, 1, 32);
+    trans1.transaction = obj.getSerializer().peekData();
+    trans1.ledgerSequence = 32;
+    ripple::STObject const metaObj = createMetaDataForBookChange(kCURRENCY, kISSUER, 22, 1, 3, 3, 1, kDOMAIN);
+    trans1.metadata = metaObj.getSerializer().peekData();
+    transactions.push_back(trans1);
+
+    EXPECT_CALL(*backend_, fetchAllTransactionsInLedger(kMAX_SEQ, _)).WillOnce(Return(transactions));
+
+    auto const handler = AnyHandler{BookChangesHandler{backend_}};
+    runSpawn([&](auto yield) {
+        auto const output = handler.process(json::parse("{}"), Context{yield});
+        ASSERT_TRUE(output);
+        EXPECT_EQ(*output.result, json::parse(kEXPECTED_OUT));
     });
 }

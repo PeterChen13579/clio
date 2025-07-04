@@ -23,8 +23,7 @@
 #include "etl/Source.hpp"
 #include "feed/SubscriptionManagerInterface.hpp"
 #include "rpc/Errors.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
-#include "util/newconfig/ObjectView.hpp"
+#include "util/config/ObjectView.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/spawn.hpp>
@@ -49,6 +48,7 @@
 
 struct MockSource : etl::SourceBase {
     MOCK_METHOD(void, run, (), (override));
+    MOCK_METHOD(void, stop, (boost::asio::yield_context), (override));
     MOCK_METHOD(bool, isConnected, (), (const, override));
     MOCK_METHOD(void, setForwarding, (bool), (override));
     MOCK_METHOD(boost::json::object, toJson, (), (const, override));
@@ -60,7 +60,7 @@ struct MockSource : etl::SourceBase {
         (uint32_t, bool, bool),
         (override)
     );
-    MOCK_METHOD((std::pair<std::vector<std::string>, bool>), loadInitialLedger, (uint32_t, uint32_t, bool), (override));
+    MOCK_METHOD((std::pair<std::vector<std::string>, bool>), loadInitialLedger, (uint32_t, uint32_t), (override));
 
     using ForwardToRippledReturnType = std::expected<boost::json::object, rpc::ClioError>;
     MOCK_METHOD(
@@ -87,6 +87,12 @@ public:
     run() override
     {
         mock_->run();
+    }
+
+    void
+    stop(boost::asio::yield_context yield) override
+    {
+        mock_->stop(yield);
     }
 
     bool
@@ -126,9 +132,9 @@ public:
     }
 
     std::pair<std::vector<std::string>, bool>
-    loadInitialLedger(uint32_t sequence, uint32_t maxLedger, bool getObjects) override
+    loadInitialLedger(uint32_t sequence, uint32_t maxLedger) override
     {
-        return mock_->loadInitialLedger(sequence, maxLedger, getObjects);
+        return mock_->loadInitialLedger(sequence, maxLedger);
     }
 
     std::expected<boost::json::object, rpc::ClioError>

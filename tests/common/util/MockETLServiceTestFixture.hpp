@@ -20,10 +20,14 @@
 #pragma once
 
 #include "util/LoggerFixtures.hpp"
+#include "util/MockAmendmentBlockHandler.hpp"
 #include "util/MockETLService.hpp"
+#include "util/MockLedgerFetcher.hpp"
 #include "util/MockLoadBalancer.hpp"
 
 #include <gmock/gmock.h>
+
+#include <memory>
 
 /**
  * @brief Fixture with a mock etl service
@@ -33,13 +37,13 @@ struct MockETLServiceTestBase : virtual public NoLoggerFixture {
     using Mock = MockType<MockETLService>;
 
 protected:
-    std::shared_ptr<Mock> mockETLServicePtr = std::make_shared<Mock>();
+    std::shared_ptr<Mock> mockETLServicePtr_ = std::make_shared<Mock>();
 };
 
 /**
  * @brief Fixture with a "nice" ETLService mock.
  *
- * Use @see MockETLServiceTestNaggy during development to get unset call expectation warnings from the embeded mock.
+ * Use @see MockETLServiceTestNaggy during development to get unset call expectation warnings from the embedded mock.
  * Once the test is ready and you are happy you can switch to this fixture to mute the warnings.
  */
 using MockETLServiceTest = MockETLServiceTestBase<::testing::NiceMock>;
@@ -61,5 +65,30 @@ using MockETLServiceTestStrict = MockETLServiceTestBase<::testing::StrictMock>;
  */
 struct MockLoadBalancerTest : virtual public NoLoggerFixture {
 protected:
-    std::shared_ptr<MockLoadBalancer> mockLoadBalancerPtr = std::make_shared<MockLoadBalancer>();
+    std::shared_ptr<MockLoadBalancer> mockLoadBalancerPtr_ = std::make_shared<MockLoadBalancer>();
+};
+
+/**
+ * @brief Fixture with a mock NG etl balancer
+ */
+struct MockNgLoadBalancerTest : virtual public NoLoggerFixture {
+protected:
+    std::shared_ptr<MockNgLoadBalancer> mockLoadBalancerPtr_ = std::make_shared<MockNgLoadBalancer>();
+};
+
+/**
+ * @brief Fixture with a mock ledger fetcher
+ */
+struct MockLedgerFetcherTest : virtual public NoLoggerFixture {
+protected:
+    std::shared_ptr<MockNgLedgerFetcher> mockLedgerFetcherPtr_ = std::make_shared<MockNgLedgerFetcher>();
+};
+
+/**
+ * @brief Fixture with a mock ledger fetcher
+ */
+struct MockAmendmentBlockHandlerTest : virtual public NoLoggerFixture {
+protected:
+    std::shared_ptr<MockAmendmentBlockHandler> mockAmendmentBlockHandlerPtr_ =
+        std::make_shared<MockAmendmentBlockHandler>();
 };

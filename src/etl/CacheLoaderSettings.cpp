@@ -19,7 +19,7 @@
 
 #include "etl/CacheLoaderSettings.hpp"
 
-#include "util/newconfig/ConfigDefinition.hpp"
+#include "util/config/ConfigDefinition.hpp"
 
 #include <boost/algorithm/string/predicate.hpp>
 
@@ -48,7 +48,7 @@ CacheLoaderSettings::isDisabled() const
 }
 
 [[nodiscard]] CacheLoaderSettings
-make_CacheLoaderSettings(util::config::ClioConfigDefinition const& config)
+makeCacheLoaderSettings(util::config::ClioConfigDefinition const& config)
 {
     CacheLoaderSettings settings;
     settings.numThreads = config.get<uint16_t>("io_threads");

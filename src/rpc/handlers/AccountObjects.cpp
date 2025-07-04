@@ -44,7 +44,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
-#include <variant>
 #include <vector>
 
 namespace rpc {
@@ -54,14 +53,14 @@ AccountObjectsHandler::process(AccountObjectsHandler::Input input, Context const
 {
     auto const range = sharedPtrBackend_->fetchLedgerRange();
     ASSERT(range.has_value(), "AccountObject's ledger range must be available");
-    auto const lgrInfoOrStatus = getLedgerHeaderFromHashOrSeq(
+    auto const expectedLgrInfo = getLedgerHeaderFromHashOrSeq(
         *sharedPtrBackend_, ctx.yield, input.ledgerHash, input.ledgerIndex, range->maxSequence
     );
 
-    if (auto const status = std::get_if<Status>(&lgrInfoOrStatus))
-        return Error{*status};
+    if (!expectedLgrInfo.has_value())
+        return Error{expectedLgrInfo.error()};
 
-    auto const lgrInfo = std::get<ripple::LedgerHeader>(lgrInfoOrStatus);
+    auto const& lgrInfo = expectedLgrInfo.value();
     auto const accountID = accountFromStringStrict(input.account);
     auto const accountLedgerObject =
         sharedPtrBackend_->fetchLedgerObject(ripple::keylet::account(*accountID).key, lgrInfo.seq, ctx.yield);
@@ -73,7 +72,7 @@ AccountObjectsHandler::process(AccountObjectsHandler::Input input, Context const
 
     if (input.deletionBlockersOnly) {
         typeFilter.emplace();
-        auto const& deletionBlockers = util::LedgerTypes::GetDeletionBlockerLedgerTypes();
+        auto const& deletionBlockers = util::LedgerTypes::getDeletionBlockerLedgerTypes();
         typeFilter->reserve(deletionBlockers.size());
 
         for (auto type : deletionBlockers) {
@@ -97,19 +96,19 @@ AccountObjectsHandler::process(AccountObjectsHandler::Input input, Context const
         return true;
     };
 
-    auto const next = traverseOwnedNodes(
+    auto const expectedNext = traverseOwnedNodes(
         *sharedPtrBackend_, *accountID, lgrInfo.seq, input.limit, input.marker, ctx.yield, addToResponse, true
     );
 
-    if (auto status = std::get_if<Status>(&next))
-        return Error{*status};
+    if (!expectedNext.has_value())
+        return Error{expectedNext.error()};
 
     response.ledgerHash = ripple::strHex(lgrInfo.hash);
     response.ledgerIndex = lgrInfo.seq;
     response.limit = input.limit;
     response.account = input.account;
 
-    auto const& nextMarker = std::get<AccountCursor>(next);
+    auto const& nextMarker = expectedNext.value();
 
     if (nextMarker.isNonZero())
         response.marker = nextMarker.toString();
@@ -161,7 +160,7 @@ tag_invoke(boost::json::value_to_tag<AccountObjectsHandler::Input>, boost::json:
     }
 
     if (jsonObject.contains(JS(type)))
-        input.type = util::LedgerTypes::GetLedgerEntryTypeFromStr(boost::json::value_to<std::string>(jv.at(JS(type))));
+        input.type = util::LedgerTypes::getLedgerEntryTypeFromStr(boost::json::value_to<std::string>(jv.at(JS(type))));
 
     if (jsonObject.contains(JS(limit)))
         input.limit = jv.at(JS(limit)).as_int64();

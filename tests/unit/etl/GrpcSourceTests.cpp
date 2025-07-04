@@ -23,7 +23,7 @@
 #include "util/MockPrometheus.hpp"
 #include "util/MockXrpLedgerAPIService.hpp"
 #include "util/TestObject.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
+#include "util/config/ConfigDefinition.hpp"
 
 #include <gmock/gmock.h>
 #include <grpcpp/server_context.h>
@@ -49,6 +49,7 @@ struct GrpcSourceTests : NoLoggerFixture, util::prometheus::WithPrometheus, test
     {
     }
 
+protected:
     std::shared_ptr<testing::StrictMock<MockBackend>> mockBackend_;
     GrpcSource grpcSource_;
 };
@@ -91,15 +92,15 @@ TEST_F(GrpcSourceTests, fetchLedgerNoStub)
 TEST_F(GrpcSourceTests, loadInitialLedgerNoStub)
 {
     GrpcSource wrongGrpcSource{"wrong", "wrong", mockBackend_};
-    auto const [data, success] = wrongGrpcSource.loadInitialLedger(0, 0, false);
+    auto const [data, success] = wrongGrpcSource.loadInitialLedger(0, 0);
     EXPECT_TRUE(data.empty());
     EXPECT_FALSE(success);
 }
 
 struct GrpcSourceLoadInitialLedgerTests : GrpcSourceTests {
+protected:
     uint32_t const sequence_ = 123;
     uint32_t const numMarkers_ = 4;
-    bool const cacheOnly_ = false;
 };
 
 TEST_F(GrpcSourceLoadInitialLedgerTests, GetLedgerDataFailed)
@@ -114,7 +115,7 @@ TEST_F(GrpcSourceLoadInitialLedgerTests, GetLedgerDataFailed)
             return grpc::Status{grpc::StatusCode::NOT_FOUND, "Not found"};
         });
 
-    auto const [data, success] = grpcSource_.loadInitialLedger(sequence_, numMarkers_, cacheOnly_);
+    auto const [data, success] = grpcSource_.loadInitialLedger(sequence_, numMarkers_);
     EXPECT_TRUE(data.empty());
     EXPECT_FALSE(success);
 }
@@ -123,7 +124,7 @@ TEST_F(GrpcSourceLoadInitialLedgerTests, worksFine)
 {
     auto const key = ripple::uint256{4};
     std::string const keyStr{reinterpret_cast<char const*>(key.data()), ripple::uint256::size()};
-    auto const object = CreateTicketLedgerObject("rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", sequence_);
+    auto const object = createTicketLedgerObject("rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", sequence_);
     auto const objectData = object.getSerializer().peekData();
 
     EXPECT_CALL(mockXrpLedgerAPIService, GetLedgerData)
@@ -145,7 +146,7 @@ TEST_F(GrpcSourceLoadInitialLedgerTests, worksFine)
     EXPECT_CALL(*mockBackend_, writeNFTs).Times(numMarkers_);
     EXPECT_CALL(*mockBackend_, writeLedgerObject).Times(numMarkers_);
 
-    auto const [data, success] = grpcSource_.loadInitialLedger(sequence_, numMarkers_, cacheOnly_);
+    auto const [data, success] = grpcSource_.loadInitialLedger(sequence_, numMarkers_);
 
     EXPECT_TRUE(success);
     EXPECT_EQ(data, std::vector<std::string>(4, keyStr));

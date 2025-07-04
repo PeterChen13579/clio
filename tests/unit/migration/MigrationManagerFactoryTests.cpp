@@ -19,9 +19,10 @@
 
 #include "migration/impl/MigrationManagerFactory.hpp"
 #include "util/LoggerFixtures.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
-#include "util/newconfig/ConfigValue.hpp"
-#include "util/newconfig/Types.hpp"
+#include "util/MockLedgerCache.hpp"
+#include "util/config/ConfigDefinition.hpp"
+#include "util/config/ConfigValue.hpp"
+#include "util/config/Types.hpp"
 
 #include <gtest/gtest.h>
 
@@ -29,10 +30,11 @@ struct MigrationManagerFactoryTests : public NoLoggerFixture {};
 
 TEST_F(MigrationManagerFactoryTests, InvalidDBType)
 {
+    MockLedgerCache cache{};
     util::config::ClioConfigDefinition const configDef{
         {"database.type", util::config::ConfigValue{util::config::ConfigType::String}.defaultValue("invalid")}
     };
-    auto const ret = migration::impl::makeMigrationManager(configDef);
+    auto const ret = migration::impl::makeMigrationManager(configDef, cache);
     EXPECT_FALSE(ret);
     EXPECT_EQ(ret.error(), "Invalid database type");
 }

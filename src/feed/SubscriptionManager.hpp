@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "data/AmendmentCenterInterface.hpp"
 #include "data/BackendInterface.hpp"
 #include "data/Types.hpp"
 #include "feed/SubscriptionManagerInterface.hpp"
@@ -30,8 +31,8 @@
 #include "feed/impl/TransactionFeed.hpp"
 #include "util/async/AnyExecutionContext.hpp"
 #include "util/async/context/BasicExecutionContext.hpp"
+#include "util/config/ConfigDefinition.hpp"
 #include "util/log/Logger.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
 
 #include <boost/asio/executor_work_guard.hpp>
 #include <boost/asio/io_context.hpp>
@@ -60,6 +61,7 @@ namespace feed {
  */
 class SubscriptionManager : public SubscriptionManagerInterface {
     std::shared_ptr<data::BackendInterface const> backend_;
+    std::shared_ptr<data::AmendmentCenterInterface const> amendmentCenter_;
     util::async::AnyExecutionContext ctx_;
     impl::ForwardFeed manifestFeed_;
     impl::ForwardFeed validationsFeed_;
@@ -67,6 +69,7 @@ class SubscriptionManager : public SubscriptionManagerInterface {
     impl::BookChangesFeed bookChangesFeed_;
     impl::TransactionFeed transactionFeed_;
     impl::ProposedTransactionFeed proposedTransactionFeed_;
+    uint32_t networkID_{0};
 
 public:
     /**
@@ -74,12 +77,14 @@ public:
      *
      * @param config The configuration to use
      * @param backend The backend to use
+     * @param amendmentCenter The amendmentCenter to use
      * @return A shared pointer to a new instance of SubscriptionManager
      */
     static std::shared_ptr<SubscriptionManager>
-    make_SubscriptionManager(
+    makeSubscriptionManager(
         util::config::ClioConfigDefinition const& config,
-        std::shared_ptr<data::BackendInterface const> const& backend
+        std::shared_ptr<data::BackendInterface const> const& backend,
+        std::shared_ptr<data::AmendmentCenterInterface const> const& amendmentCenter
     )
     {
         auto const workersNum = config.get<uint64_t>("subscription_workers");
@@ -87,7 +92,9 @@ public:
         util::Logger const logger{"Subscriptions"};
         LOG(logger.info()) << "Starting subscription manager with " << workersNum << " workers";
 
-        return std::make_shared<feed::SubscriptionManager>(util::async::PoolExecutionContext(workersNum), backend);
+        return std::make_shared<feed::SubscriptionManager>(
+            util::async::PoolExecutionContext(workersNum), backend, amendmentCenter
+        );
     }
 
     /**
@@ -95,12 +102,15 @@ public:
      *
      * @param executor The executor to use to publish the feeds
      * @param backend The backend to use
+     * @param amendmentCenter The amendmentCenter to use
      */
     SubscriptionManager(
         util::async::AnyExecutionContext&& executor,
-        std::shared_ptr<data::BackendInterface const> const& backend
+        std::shared_ptr<data::BackendInterface const> const& backend,
+        std::shared_ptr<data::AmendmentCenterInterface const> const& amendmentCenter
     )
         : backend_(backend)
+        , amendmentCenter_(amendmentCenter)
         , ctx_(std::move(executor))
         , manifestFeed_(ctx_, "manifest")
         , validationsFeed_(ctx_, "validations")
@@ -115,6 +125,15 @@ public:
      * @brief Destructor of the SubscriptionManager object. It will block until all running jobs finished.
      */
     ~SubscriptionManager() override
+    {
+        stop();
+    }
+
+    /**
+     * @brief Stop the SubscriptionManager and wait for all jobs to finish.
+     */
+    void
+    stop() override
     {
         ctx_.stop();
         ctx_.join();
@@ -141,7 +160,7 @@ public:
      */
     void
     pubBookChanges(ripple::LedgerHeader const& lgrInfo, std::vector<data::TransactionAndMetadata> const& transactions)
-        const final;
+        final;
 
     /**
      * @brief Subscribe to the proposed transactions feed.
@@ -209,7 +228,7 @@ public:
         ripple::Fees const& fees,
         std::string const& ledgerRange,
         std::uint32_t txnCount
-    ) const final;
+    ) final;
 
     /**
      * @brief Subscribe to the manifest feed.
@@ -230,7 +249,7 @@ public:
      * @param manifestJson The manifest json to forward.
      */
     void
-    forwardManifest(boost::json::object const& manifestJson) const final;
+    forwardManifest(boost::json::object const& manifestJson) final;
 
     /**
      * @brief Subscribe to the validation feed.
@@ -251,7 +270,7 @@ public:
      * @param validationJson The validation feed json to forward.
      */
     void
-    forwardValidation(boost::json::object const& validationJson) const final;
+    forwardValidation(boost::json::object const& validationJson) final;
 
     /**
      * @brief Subscribe to the transactions feed.
@@ -314,6 +333,21 @@ public:
      */
     boost::json::object
     report() const final;
+
+    /**
+     * @brief Set the networkID.
+     * @param networkID The network id to set.
+     */
+    void
+    setNetworkID(uint32_t networkID) final;
+
+    /**
+     * @brief Get the networkID.
+     *
+     * @return The network id.
+     */
+    uint32_t
+    getNetworkID() const final;
 };
 
 }  // namespace feed

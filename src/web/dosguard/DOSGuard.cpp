@@ -20,11 +20,14 @@
 #include "web/dosguard/DOSGuard.hpp"
 
 #include "util/Assert.hpp"
+#include "util/config/ArrayView.hpp"
+#include "util/config/ConfigDefinition.hpp"
+#include "util/config/ValueView.hpp"
 #include "util/log/Logger.hpp"
-#include "util/newconfig/ArrayView.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
-#include "util/newconfig/ValueView.hpp"
+#include "web/dosguard/WeightsInterface.hpp"
 #include "web/dosguard/WhitelistHandlerInterface.hpp"
+
+#include <boost/json/object.hpp>
 
 #include <cstdint>
 #include <functional>
@@ -37,8 +40,13 @@ using namespace util::config;
 
 namespace web::dosguard {
 
-DOSGuard::DOSGuard(ClioConfigDefinition const& config, WhitelistHandlerInterface const& whitelistHandler)
+DOSGuard::DOSGuard(
+    ClioConfigDefinition const& config,
+    WhitelistHandlerInterface const& whitelistHandler,
+    WeightsInterface const& weights
+)
     : whitelistHandler_{std::cref(whitelistHandler)}
+    , weights_(weights)
     , maxFetches_{config.get<uint32_t>("dos_guard.max_fetches")}
     , maxConnCount_{config.get<uint32_t>("dos_guard.max_connections")}
     , maxRequestCount_{config.get<uint32_t>("dos_guard.max_requests")}
@@ -58,17 +66,17 @@ DOSGuard::isOk(std::string const& ip) const noexcept
         return true;
 
     {
-        std::scoped_lock const lck(mtx_);
-        if (ipState_.find(ip) != ipState_.end()) {
-            auto [transferedByte, requests] = ipState_.at(ip);
-            if (transferedByte > maxFetches_ || requests > maxRequestCount_) {
+        auto lock = mtx_.lock<std::scoped_lock>();
+        if (auto const it = lock->ipState.find(ip); it != lock->ipState.end()) {
+            auto const [transferredByte, requests] = it->second;
+            if (transferredByte > maxFetches_ || requests > maxRequestCount_) {
                 LOG(log_.warn()) << "Dosguard: Client surpassed the rate limit. ip = " << ip
-                                 << " Transfered Byte: " << transferedByte << "; Requests: " << requests;
+                                 << " Transferred Byte: " << transferredByte << "; Requests: " << requests;
                 return false;
             }
         }
-        auto it = ipConnCount_.find(ip);
-        if (it != ipConnCount_.end()) {
+        auto it = lock->ipConnCount.find(ip);
+        if (it != lock->ipConnCount.end()) {
             if (it->second > maxConnCount_) {
                 LOG(log_.warn()) << "Dosguard: Client surpassed the rate limit. ip = " << ip
                                  << " Concurrent connection: " << it->second;
@@ -84,8 +92,8 @@ DOSGuard::increment(std::string const& ip) noexcept
 {
     if (whitelistHandler_.get().isWhiteListed(ip))
         return;
-    std::scoped_lock const lck{mtx_};
-    ipConnCount_[ip]++;
+    auto lock = mtx_.lock<std::scoped_lock>();
+    lock->ipConnCount[ip]++;
 }
 
 void
@@ -93,11 +101,11 @@ DOSGuard::decrement(std::string const& ip) noexcept
 {
     if (whitelistHandler_.get().isWhiteListed(ip))
         return;
-    std::scoped_lock const lck{mtx_};
-    ASSERT(ipConnCount_[ip] > 0, "Connection count for ip {} can't be 0", ip);
-    ipConnCount_[ip]--;
-    if (ipConnCount_[ip] == 0)
-        ipConnCount_.erase(ip);
+    auto lock = mtx_.lock<std::scoped_lock>();
+    ASSERT(lock->ipConnCount[ip] > 0, "Connection count for ip {} can't be 0", ip);
+    lock->ipConnCount[ip]--;
+    if (lock->ipConnCount[ip] == 0)
+        lock->ipConnCount.erase(ip);
 }
 
 [[maybe_unused]] bool
@@ -107,22 +115,24 @@ DOSGuard::add(std::string const& ip, uint32_t numObjects) noexcept
         return true;
 
     {
-        std::scoped_lock const lck(mtx_);
-        ipState_[ip].transferedByte += numObjects;
+        auto lock = mtx_.lock<std::scoped_lock>();
+        lock->ipState[ip].transferredByte += numObjects;
     }
 
     return isOk(ip);
 }
 
 [[maybe_unused]] bool
-DOSGuard::request(std::string const& ip) noexcept
+DOSGuard::request(std::string const& ip, boost::json::object const& request)
 {
     if (whitelistHandler_.get().isWhiteListed(ip))
         return true;
 
+    auto const weight = weights_.get().requestWeight(request);
+
     {
-        std::scoped_lock const lck(mtx_);
-        ipState_[ip].requestsCount++;
+        auto lock = mtx_.lock<std::scoped_lock>();
+        lock->ipState[ip].requestsCount += weight;
     }
 
     return isOk(ip);
@@ -131,8 +141,8 @@ DOSGuard::request(std::string const& ip) noexcept
 void
 DOSGuard::clear() noexcept
 {
-    std::scoped_lock const lck(mtx_);
-    ipState_.clear();
+    auto lock = mtx_.lock<std::scoped_lock>();
+    lock->ipState.clear();
 }
 
 [[nodiscard]] std::unordered_set<std::string>

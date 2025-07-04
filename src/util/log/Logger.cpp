@@ -20,15 +20,14 @@
 #include "util/log/Logger.hpp"
 
 #include "util/Assert.hpp"
+#include "util/BytesConverter.hpp"
 #include "util/SourceLocation.hpp"
-#include "util/newconfig/ArrayView.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
-#include "util/newconfig/ObjectView.hpp"
+#include "util/config/ArrayView.hpp"
+#include "util/config/ConfigDefinition.hpp"
+#include "util/config/ObjectView.hpp"
 
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/date_time/posix_time/posix_time_duration.hpp>
-#include <boost/filesystem/operations.hpp>
-#include <boost/filesystem/path.hpp>
 #include <boost/log/attributes/attribute_value_set.hpp>
 #include <boost/log/core/core.hpp>
 #include <boost/log/expressions/filter.hpp>
@@ -47,31 +46,33 @@
 #include <boost/log/utility/setup/console.hpp>
 #include <boost/log/utility/setup/file.hpp>
 #include <boost/log/utility/setup/formatter_parser.hpp>
+#include <fmt/core.h>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <ios>
 #include <iostream>
 #include <optional>
 #include <ostream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 
 namespace util {
 
-Logger LogService::general_log_ = Logger{"General"};
-Logger LogService::alert_log_ = Logger{"Alert"};
-boost::log::filter LogService::filter_{};
+Logger LogService::generalLog = Logger{"General"};
+Logger LogService::alertLog = Logger{"Alert"};
+boost::log::filter LogService::filter{};
 
 std::ostream&
 operator<<(std::ostream& stream, Severity sev)
 {
-    static constexpr std::array<char const*, 6> labels = {
+    static constexpr std::array<char const*, 6> kLABELS = {
         "TRC",
         "DBG",
         "NFO",
@@ -80,7 +81,7 @@ operator<<(std::ostream& stream, Severity sev)
         "FTL",
     };
 
-    return stream << labels.at(static_cast<int>(sev));
+    return stream << kLABELS.at(static_cast<int>(sev));
 }
 
 /**
@@ -110,7 +111,7 @@ getSeverityLevel(std::string_view logLevel)
     std::unreachable();
 }
 
-void
+std::expected<void, std::string>
 LogService::init(config::ClioConfigDefinition const& config)
 {
     namespace keywords = boost::log::keywords;
@@ -122,21 +123,29 @@ LogService::init(config::ClioConfigDefinition const& config)
 
     if (config.get<bool>("log_to_console")) {
         boost::log::add_console_log(
-            std::cout, keywords::format = format, keywords::filter = log_severity < Severity::FTL
+            std::cout, keywords::format = format, keywords::filter = LogSeverity < Severity::FTL
         );
     }
 
     // Always print fatal logs to cerr
-    boost::log::add_console_log(std::cerr, keywords::format = format, keywords::filter = log_severity >= Severity::FTL);
+    boost::log::add_console_log(std::cerr, keywords::format = format, keywords::filter = LogSeverity >= Severity::FTL);
 
     auto const logDir = config.maybeValue<std::string>("log_directory");
     if (logDir) {
-        boost::filesystem::path dirPath{logDir.value()};
-        if (!boost::filesystem::exists(dirPath))
-            boost::filesystem::create_directories(dirPath);
-        auto const rotationSize = config.get<uint64_t>("log_rotation_size");
+        std::filesystem::path dirPath{logDir.value()};
+        if (not std::filesystem::exists(dirPath)) {
+            if (std::error_code error; not std::filesystem::create_directories(dirPath, error)) {
+                return std::unexpected{
+                    fmt::format("Couldn't create logs directory '{}': {}", dirPath.string(), error.message())
+                };
+            }
+        }
+
         auto const rotationPeriod = config.get<uint32_t>("log_rotation_hour_interval");
-        auto const dirSize = config.get<uint64_t>("log_directory_max_size");
+
+        // the below are taken from user in MB, but boost::log::add_file_log needs it to be in bytes
+        auto const rotationSize = mbToBytes(config.get<uint32_t>("log_rotation_size"));
+        auto const dirSize = mbToBytes(config.get<uint32_t>("log_directory_max_size"));
         auto fileSink = boost::log::add_file_log(
             keywords::file_name = dirPath / "clio.log",
             keywords::target_file_name = dirPath / "clio_%Y-%m-%d_%H-%M-%S.log",
@@ -156,36 +165,44 @@ LogService::init(config::ClioConfigDefinition const& config)
     // get default severity, can be overridden per channel using the `log_channels` array
     auto const defaultSeverity = getSeverityLevel(config.get<std::string>("log_level"));
 
-    std::unordered_map<std::string, Severity> min_severity;
-    for (auto const& channel : Logger::CHANNELS)
-        min_severity[channel] = defaultSeverity;
-    min_severity["Alert"] = Severity::WRN;  // Channel for alerts, always warning severity
+    std::unordered_map<std::string, Severity> minSeverity;
+    for (auto const& channel : Logger::kCHANNELS)
+        minSeverity[channel] = defaultSeverity;
+    minSeverity["Alert"] = Severity::WRN;  // Channel for alerts, always warning severity
 
     auto const overrides = config.getArray("log_channels");
 
     for (auto it = overrides.begin<util::config::ObjectView>(); it != overrides.end<util::config::ObjectView>(); ++it) {
-        auto const& cfg = *it;
-        auto name = cfg.get<std::string>("channel");
-        if (std::count(std::begin(Logger::CHANNELS), std::end(Logger::CHANNELS), name) == 0)
-            throw std::runtime_error("Can't override settings for log channel " + name + ": invalid channel");
+        auto const& channelConfig = *it;
+        auto const name = channelConfig.get<std::string>("channel");
+        if (std::ranges::count(Logger::kCHANNELS, name) == 0) {  // TODO: use std::ranges::contains when available
+            return std::unexpected{fmt::format("Can't override settings for log channel {}: invalid channel", name)};
+        }
 
-        min_severity[name] = getSeverityLevel(config.get<std::string>("log_level"));
+        minSeverity[name] = getSeverityLevel(channelConfig.get<std::string>("log_level"));
     }
 
-    auto log_filter = [min_severity = std::move(min_severity),
-                       defaultSeverity](boost::log::attribute_value_set const& attributes) -> bool {
-        auto const channel = attributes[log_channel];
-        auto const severity = attributes[log_severity];
+    auto logFilter = [minSeverity = std::move(minSeverity),
+                      defaultSeverity](boost::log::attribute_value_set const& attributes) -> bool {
+        auto const channel = attributes[LogChannel];
+        auto const severity = attributes[LogSeverity];
         if (!channel || !severity)
             return false;
-        if (auto const it = min_severity.find(channel.get()); it != min_severity.end())
+        if (auto const it = minSeverity.find(channel.get()); it != minSeverity.end())
             return severity.get() >= it->second;
         return severity.get() >= defaultSeverity;
     };
 
-    filter_ = boost::log::filter{std::move(log_filter)};
-    boost::log::core::get()->set_filter(filter_);
+    filter = boost::log::filter{std::move(logFilter)};
+    boost::log::core::get()->set_filter(filter);
     LOG(LogService::info()) << "Default log level = " << defaultSeverity;
+    return {};
+}
+
+bool
+LogService::enabled()
+{
+    return boost::log::core::get()->get_logging_enabled();
 }
 
 Logger::Pump
@@ -220,16 +237,16 @@ Logger::fatal(SourceLocationType const& loc) const
 };
 
 std::string
-Logger::Pump::pretty_path(SourceLocationType const& loc, size_t max_depth)
+Logger::Pump::prettyPath(SourceLocationType const& loc, size_t maxDepth)
 {
-    auto const file_path = std::string{loc.file_name()};
-    auto idx = file_path.size();
-    while (max_depth-- > 0) {
-        idx = file_path.rfind('/', idx - 1);
+    auto const filePath = std::string{loc.file_name()};
+    auto idx = filePath.size();
+    while (maxDepth-- > 0) {
+        idx = filePath.rfind('/', idx - 1);
         if (idx == std::string::npos || idx == 0)
             break;
     }
-    return file_path.substr(idx == std::string::npos ? 0 : idx + 1) + ':' + std::to_string(loc.line());
+    return filePath.substr(idx == std::string::npos ? 0 : idx + 1) + ':' + std::to_string(loc.line());
 }
 
 }  // namespace util

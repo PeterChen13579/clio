@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of clio: https://github.com/XRPLF/clio
-    Copyright (c) 2022-2024, the clio developers.
+    Copyright (c) 2024, the clio developers.
 
     Permission to use, copy, modify, and distribute this software for any
     purpose with or without fee is hereby granted, provided that the above
@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "data/LedgerCacheInterface.hpp"
 #include "data/cassandra/Handle.hpp"
 #include "data/cassandra/Schema.hpp"
 #include "data/cassandra/SettingsProvider.hpp"
@@ -50,9 +51,10 @@ public:
      * @brief Construct a new Cassandra Migration Test Backend object
      *
      * @param settingsProvider The settings provider for the Cassandra backend
+     * @param cache The ledger cache to use
      */
-    CassandraMigrationTestBackend(data::cassandra::SettingsProvider settingsProvider)
-        : migration::cassandra::CassandraMigrationBackend(settingsProvider)
+    CassandraMigrationTestBackend(data::cassandra::SettingsProvider settingsProvider, data::LedgerCacheInterface& cache)
+        : migration::cassandra::CassandraMigrationBackend(settingsProvider, cache)
         , settingsProvider_(std::move(settingsProvider))
 
     {
@@ -70,17 +72,17 @@ public:
     void
     writeTxIndexExample(std::string const& hash, std::string const& txType)
     {
-        auto static insertTxIndexExample = [this]() {
+        static auto kINSERT_TX_INDEX_EXAMPLE = [this]() {
             return handle_.prepare(fmt::format(
                 R"(
-                INSERT INTO {} 
+                INSERT INTO {}
                        (hash, tx_type)
                 VALUES (?, ?)
                 )",
                 data::cassandra::qualifiedTableName(settingsProvider_, "tx_index_example")
             ));
         }();
-        executor_.writeSync(insertTxIndexExample.bind(hash, data::cassandra::Text(txType)));
+        executor_.writeSync(kINSERT_TX_INDEX_EXAMPLE.bind(hash, data::cassandra::Text(txType)));
     }
 
     /**
@@ -94,7 +96,7 @@ public:
     std::optional<std::string>
     fetchTxTypeViaID(std::string const& hash, boost::asio::yield_context ctx)
     {
-        auto static fetchTxType = [this]() {
+        static auto kFETCH_TX_TYPE = [this]() {
             return handle_.prepare(fmt::format(
                 R"(
                 SELECT tx_type FROM {} WHERE hash = ?
@@ -102,7 +104,7 @@ public:
                 data::cassandra::qualifiedTableName(settingsProvider_, "tx_index_example")
             ));
         }();
-        auto const res = executor_.read(ctx, fetchTxType.bind(hash));
+        auto const res = executor_.read(ctx, kFETCH_TX_TYPE.bind(hash));
         if (not res) {
             return std::nullopt;
         }
@@ -127,7 +129,7 @@ public:
     std::optional<std::uint64_t>
     fetchTxIndexTableSize(boost::asio::yield_context ctx)
     {
-        auto static insertTxIndexExample = [this]() {
+        static auto kINSERT_TX_INDEX_EXAMPLE = [this]() {
             return handle_.prepare(fmt::format(
                 R"(
                 SELECT COUNT(*) FROM {}
@@ -138,7 +140,7 @@ public:
 
         // This function will be called after table being dropped, catch the exception
         try {
-            auto const res = executor_.read(ctx, insertTxIndexExample);
+            auto const res = executor_.read(ctx, kINSERT_TX_INDEX_EXAMPLE);
             if (not res) {
                 return std::nullopt;
             }
@@ -166,17 +168,17 @@ public:
     void
     writeLedgerAccountHash(std::uint64_t sequence, std::string const& accountHash)
     {
-        auto static insertLedgerExample = [this]() {
+        static auto kINSERT_LEDGER_EXAMPLE = [this]() {
             return handle_.prepare(fmt::format(
                 R"(
-                INSERT INTO {} 
+                INSERT INTO {}
                        (sequence, account_hash)
                 VALUES (?, ?)
                 )",
                 data::cassandra::qualifiedTableName(settingsProvider_, "ledger_example")
             ));
         }();
-        executor_.writeSync(insertLedgerExample.bind(sequence, accountHash));
+        executor_.writeSync(kINSERT_LEDGER_EXAMPLE.bind(sequence, accountHash));
     }
 
     /**
@@ -190,7 +192,7 @@ public:
     std::optional<ripple::uint256>
     fetchAccountHashViaSequence(std::uint64_t sequence, boost::asio::yield_context ctx)
     {
-        auto static fetchAccountHash = [this]() {
+        static auto kFETCH_ACCOUNT_HASH = [this]() {
             return handle_.prepare(fmt::format(
                 R"(
                 SELECT account_hash FROM {} WHERE sequence = ?
@@ -198,7 +200,7 @@ public:
                 data::cassandra::qualifiedTableName(settingsProvider_, "ledger_example")
             ));
         }();
-        auto const res = executor_.read(ctx, fetchAccountHash.bind(sequence));
+        auto const res = executor_.read(ctx, kFETCH_ACCOUNT_HASH.bind(sequence));
         if (not res) {
             return std::nullopt;
         }
@@ -223,7 +225,7 @@ public:
     std::optional<std::uint64_t>
     fetchLedgerTableSize(boost::asio::yield_context ctx)
     {
-        auto static insertLedgerExample = [this]() {
+        static auto kINSERT_LEDGER_EXAMPLE = [this]() {
             return handle_.prepare(fmt::format(
                 R"(
                 SELECT COUNT(*) FROM {}
@@ -234,7 +236,7 @@ public:
 
         // This function will be called after table being dropped, catch the exception
         try {
-            auto const res = executor_.read(ctx, insertLedgerExample);
+            auto const res = executor_.read(ctx, kINSERT_LEDGER_EXAMPLE);
             if (not res) {
                 return std::nullopt;
             }
@@ -278,7 +280,7 @@ public:
     std::optional<std::uint64_t>
     fetchDiffTableSize(boost::asio::yield_context ctx)
     {
-        auto static countDiff = [this]() {
+        static auto kCOUNT_DIFF = [this]() {
             return handle_.prepare(fmt::format(
                 R"(
                 SELECT COUNT(*) FROM {}
@@ -289,7 +291,7 @@ public:
 
         // This function will be called after table being dropped, catch the exception
         try {
-            auto const res = executor_.read(ctx, countDiff);
+            auto const res = executor_.read(ctx, kCOUNT_DIFF);
             if (not res) {
                 return std::nullopt;
             }
@@ -317,11 +319,11 @@ private:
         statements.emplace_back(fmt::format(
             R"(
             CREATE TABLE IF NOT EXISTS {}
-                   (      
+                   (
                         hash blob,
                      tx_type text,
-                     PRIMARY KEY (hash) 
-                   ) 
+                     PRIMARY KEY (hash)
+                   )
             )",
             data::cassandra::qualifiedTableName(settingsProvider_, "tx_index_example")
         ));
@@ -329,11 +331,11 @@ private:
         statements.emplace_back(fmt::format(
             R"(
             CREATE TABLE IF NOT EXISTS {}
-                   (      
+                   (
                         sequence bigint,
                     account_hash blob,
-                         PRIMARY KEY (sequence) 
-                   ) 
+                         PRIMARY KEY (sequence)
+                   )
             )",
             data::cassandra::qualifiedTableName(settingsProvider_, "ledger_example")
         ));

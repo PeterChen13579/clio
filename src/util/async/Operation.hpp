@@ -19,9 +19,9 @@
 
 #pragma once
 
+#include "util/MoveTracker.hpp"
 #include "util/Repeat.hpp"
 #include "util/async/Concepts.hpp"
-#include "util/async/Error.hpp"
 #include "util/async/Outcome.hpp"
 #include "util/async/context/impl/Cancellation.hpp"
 #include "util/async/context/impl/Timer.hpp"
@@ -32,11 +32,11 @@
 #include <concepts>
 #include <condition_variable>
 #include <expected>
+#include <functional>
 #include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <thread>
 
 namespace util::async {
 namespace impl {
@@ -71,12 +71,13 @@ public:
 };
 
 template <typename CtxType, typename OpType>
-struct BasicScheduledOperation {
-    struct State {
+struct BasicScheduledOperation : util::MoveTracker {
+    class State {
         std::mutex m_;
         std::condition_variable ready_;
         std::optional<OpType> op_{std::nullopt};
 
+    public:
         void
         emplace(auto&& op)
         {
@@ -94,39 +95,52 @@ struct BasicScheduledOperation {
         }
     };
 
-    std::shared_ptr<State> state_ = std::make_shared<State>();
-    typename CtxType::Timer timer_;
+    std::shared_ptr<State> state = std::make_shared<State>();
+    typename CtxType::Timer timer;
 
     BasicScheduledOperation(auto& executor, auto delay, auto&& fn)
-        : timer_(executor, delay, [state = state_, fn = std::forward<decltype(fn)>(fn)](auto ec) mutable {
+        : timer(executor, delay, [state = state, fn = std::forward<decltype(fn)>(fn)](auto ec) mutable {
             state->emplace(fn(ec));
         })
     {
     }
 
+    ~BasicScheduledOperation() override
+    {
+        if (not wasMoved())
+            abort();
+    }
+
+    BasicScheduledOperation(BasicScheduledOperation const&) = default;
+    BasicScheduledOperation&
+    operator=(BasicScheduledOperation const&) = default;
+    BasicScheduledOperation(BasicScheduledOperation&&) = default;
+    BasicScheduledOperation&
+    operator=(BasicScheduledOperation&&) = default;
+
     [[nodiscard]] auto
     get()
     {
-        return state_->get().get();
+        return state->get().get();
     }
 
     void
     wait() noexcept
     {
-        state_->get().wait();
+        state->get().wait();
     }
 
     void
     cancel() noexcept
     {
-        timer_.cancel();
+        timer.cancel();
     }
 
     void
     requestStop() noexcept
         requires(SomeStoppableOperation<OpType>)
     {
-        state_->get().requestStop();
+        state->get().requestStop();
     }
 
     void
@@ -148,7 +162,8 @@ struct BasicScheduledOperation {
  * @tparam StopSourceType The type of the stop source
  */
 template <typename RetType, typename StopSourceType>
-class StoppableOperation : public impl::BasicOperation<StoppableOutcome<RetType, StopSourceType>> {
+class StoppableOperation : public impl::BasicOperation<StoppableOutcome<RetType, StopSourceType>>,
+                           public util::MoveTracker {
     using OutcomeType = StoppableOutcome<RetType, StopSourceType>;
 
     StopSourceType stopSource_;
@@ -163,6 +178,19 @@ public:
         : impl::BasicOperation<OutcomeType>(outcome), stopSource_(outcome->getStopSource())
     {
     }
+
+    ~StoppableOperation() override
+    {
+        if (not wasMoved())
+            requestStop();
+    }
+
+    StoppableOperation(StoppableOperation const&) = delete;
+    StoppableOperation&
+    operator=(StoppableOperation const&) = delete;
+    StoppableOperation(StoppableOperation&&) = default;
+    StoppableOperation&
+    operator=(StoppableOperation&&) = default;
 
     /** @brief Requests the operation to stop */
     void
@@ -198,8 +226,9 @@ using ScheduledOperation = impl::BasicScheduledOperation<CtxType, OpType>;
  * @tparam CtxType The type of the execution context
  */
 template <typename CtxType>
-class RepeatingOperation {
+class RepeatingOperation : public util::MoveTracker {
     util::Repeat repeat_;
+    std::function<void()> action_;
 
 public:
     /**
@@ -210,10 +239,17 @@ public:
      * @param interval Time to wait before repeating the user-provided block of code
      * @param fn The function to execute repeatedly
      */
-    RepeatingOperation(auto& executor, std::chrono::steady_clock::duration interval, std::invocable auto&& fn)
-        : repeat_(executor)
+    template <std::invocable FnType>
+    RepeatingOperation(auto& executor, std::chrono::steady_clock::duration interval, FnType&& fn)
+        : repeat_(executor), action_([fn = std::forward<FnType>(fn), &executor] { boost::asio::post(executor, fn); })
     {
-        repeat_.start(interval, std::forward<decltype(fn)>(fn));
+        repeat_.start(interval, action_);
+    }
+
+    ~RepeatingOperation() override
+    {
+        if (not wasMoved())
+            abort();
     }
 
     RepeatingOperation(RepeatingOperation const&) = delete;
@@ -232,6 +268,18 @@ public:
     abort() noexcept
     {
         repeat_.stop();
+    }
+
+    /**
+     * @brief Force-invoke the operation
+     * @note The action is scheduled on the underlying context/strand
+     * @warning The code of the user-provided action is expected to take care of thread-safety unless this operation is
+     * scheduled through a strand
+     */
+    void
+    invoke()
+    {
+        action_();
     }
 };
 

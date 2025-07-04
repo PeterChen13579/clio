@@ -57,7 +57,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include <variant>
 
 namespace {
 
@@ -65,11 +64,11 @@ std::string
 toIso8601(ripple::NetClock::time_point tp)
 {
     using namespace std::chrono;
-    static auto constexpr rippleEpochOffset = seconds{rippleEpochStart};
+    static constexpr auto kRIPPLE_EPOCH_OFFSET = seconds{kRIPPLE_EPOCH_START};
 
     return date::format(
         "%Y-%Om-%dT%H:%M:%OS%z",
-        date::sys_time<system_clock::duration>(system_clock::time_point{tp.time_since_epoch() + rippleEpochOffset})
+        date::sys_time<system_clock::duration>(system_clock::time_point{tp.time_since_epoch() + kRIPPLE_EPOCH_OFFSET})
     );
 };
 
@@ -97,14 +96,14 @@ AMMInfoHandler::process(AMMInfoHandler::Input input, Context const& ctx) const
     auto const range = sharedPtrBackend_->fetchLedgerRange();
     ASSERT(range.has_value(), "AMMInfo's ledger range must be available");
 
-    auto const lgrInfoOrStatus = getLedgerHeaderFromHashOrSeq(
+    auto const expectedLgrInfo = getLedgerHeaderFromHashOrSeq(
         *sharedPtrBackend_, ctx.yield, input.ledgerHash, input.ledgerIndex, range->maxSequence
     );
 
-    if (auto const status = std::get_if<Status>(&lgrInfoOrStatus))
-        return Error{*status};
+    if (!expectedLgrInfo.has_value())
+        return Error{expectedLgrInfo.error()};
 
-    auto const lgrInfo = std::get<LedgerHeader>(lgrInfoOrStatus);
+    auto const& lgrInfo = expectedLgrInfo.value();
 
     if (input.accountID) {
         auto keylet = keylet::account(*input.accountID);
@@ -149,8 +148,9 @@ AMMInfoHandler::process(AMMInfoHandler::Input input, Context const& ctx) const
         issue2 = amm[sfAsset2].get<Issue>();
     }
 
-    auto const [asset1Balance, asset2Balance] =
-        getAmmPoolHolds(*sharedPtrBackend_, lgrInfo.seq, ammAccountID, issue1, issue2, false, ctx.yield);
+    auto const [asset1Balance, asset2Balance] = getAmmPoolHolds(
+        *sharedPtrBackend_, *amendmentCenter_, lgrInfo.seq, ammAccountID, issue1, issue2, false, ctx.yield
+    );
     auto const lptAMMBalance = input.accountID
         ? getAmmLpHolds(*sharedPtrBackend_, lgrInfo.seq, amm, *input.accountID, ctx.yield)
         : amm[sfLPTokenBalance];
@@ -229,7 +229,7 @@ AMMInfoHandler::process(AMMInfoHandler::Input input, Context const& ctx) const
 RpcSpecConstRef
 AMMInfoHandler::spec([[maybe_unused]] uint32_t apiVersion)
 {
-    static auto const stringIssueValidator =
+    static auto const kSTRING_ISSUE_VALIDATOR =
         validation::CustomValidator{[](boost::json::value const& value, std::string_view key) -> MaybeError {
             if (not value.is_string())
                 return Error{Status{RippledError::rpcINVALID_PARAMS, std::string(key) + "NotString"}};
@@ -243,36 +243,36 @@ AMMInfoHandler::spec([[maybe_unused]] uint32_t apiVersion)
             return MaybeError{};
         }};
 
-    static auto const rpcSpec = RpcSpec{
-        {JS(ledger_hash), validation::CustomValidators::Uint256HexStringValidator},
-        {JS(ledger_index), validation::CustomValidators::LedgerIndexValidator},
+    static auto const kRPC_SPEC = RpcSpec{
+        {JS(ledger_hash), validation::CustomValidators::uint256HexStringValidator},
+        {JS(ledger_index), validation::CustomValidators::ledgerIndexValidator},
         {JS(asset),
          meta::WithCustomError{
              validation::Type<std::string, boost::json::object>{}, Status(RippledError::rpcISSUE_MALFORMED)
          },
-         meta::IfType<std::string>{stringIssueValidator},
+         meta::IfType<std::string>{kSTRING_ISSUE_VALIDATOR},
          meta::IfType<boost::json::object>{
              meta::WithCustomError{
-                 validation::CustomValidators::CurrencyIssueValidator, Status(RippledError::rpcISSUE_MALFORMED)
+                 validation::CustomValidators::currencyIssueValidator, Status(RippledError::rpcISSUE_MALFORMED)
              },
          }},
         {JS(asset2),
          meta::WithCustomError{
              validation::Type<std::string, boost::json::object>{}, Status(RippledError::rpcISSUE_MALFORMED)
          },
-         meta::IfType<std::string>{stringIssueValidator},
+         meta::IfType<std::string>{kSTRING_ISSUE_VALIDATOR},
          meta::IfType<boost::json::object>{
              meta::WithCustomError{
-                 validation::CustomValidators::CurrencyIssueValidator, Status(RippledError::rpcISSUE_MALFORMED)
+                 validation::CustomValidators::currencyIssueValidator, Status(RippledError::rpcISSUE_MALFORMED)
              },
          }},
         {JS(amm_account),
-         meta::WithCustomError{validation::CustomValidators::AccountValidator, Status(RippledError::rpcACT_MALFORMED)}},
+         meta::WithCustomError{validation::CustomValidators::accountValidator, Status(RippledError::rpcACT_MALFORMED)}},
         {JS(account),
-         meta::WithCustomError{validation::CustomValidators::AccountValidator, Status(RippledError::rpcACT_MALFORMED)}},
+         meta::WithCustomError{validation::CustomValidators::accountValidator, Status(RippledError::rpcACT_MALFORMED)}},
     };
 
-    return rpcSpec;
+    return kRPC_SPEC;
 }
 
 void

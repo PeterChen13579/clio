@@ -41,6 +41,7 @@
 #include <xrpl/protocol/STAmount.h>
 #include <xrpl/protocol/STArray.h>
 #include <xrpl/protocol/STIssue.h>
+#include <xrpl/protocol/STNumber.h>
 #include <xrpl/protocol/STObject.h>
 #include <xrpl/protocol/STVector256.h>
 #include <xrpl/protocol/TER.h>
@@ -57,28 +58,30 @@
 #include <utility>
 #include <vector>
 
-constexpr static auto INDEX1 = "1B8590C01B0006EDFA9ED60296DD052DC5E90F99659B25014D08E1BC983515BC";
+namespace {
+constexpr auto kINDEX1 = "1B8590C01B0006EDFA9ED60296DD052DC5E90F99659B25014D08E1BC983515BC";
+}  // namespace
 
 ripple::AccountID
-GetAccountIDWithString(std::string_view id)
+getAccountIdWithString(std::string_view id)
 {
     return util::parseBase58Wrapper<ripple::AccountID>(std::string(id)).value();
 }
 
 ripple::uint256
-GetAccountKey(std::string_view id)
+getAccountKey(std::string_view id)
 {
-    return ripple::keylet::account(GetAccountIDWithString(id)).key;
+    return ripple::keylet::account(getAccountIdWithString(id)).key;
 }
 
 ripple::uint256
-GetAccountKey(ripple::AccountID const& acc)
+getAccountKey(ripple::AccountID const& acc)
 {
     return ripple::keylet::account(acc).key;
 }
 
 ripple::LedgerHeader
-CreateLedgerHeader(std::string_view ledgerHash, ripple::LedgerIndex seq, std::optional<uint32_t> age)
+createLedgerHeader(std::string_view ledgerHash, ripple::LedgerIndex seq, std::optional<uint32_t> age)
 {
     using namespace std::chrono;
 
@@ -87,8 +90,10 @@ CreateLedgerHeader(std::string_view ledgerHash, ripple::LedgerIndex seq, std::op
     ledgerHeader.seq = seq;
 
     if (age) {
+        // Note: be cautious of using age values close to each other as the underlying NetClock precision is seconds
+        // and the small time difference may lead to comparison bugs
         auto const now = duration_cast<seconds>(system_clock::now().time_since_epoch());
-        auto const closeTime = (now - seconds{age.value()}).count() - rippleEpochStart;
+        auto const closeTime = (now - seconds{age.value()}).count() - kRIPPLE_EPOCH_START;
         ledgerHeader.closeTime = ripple::NetClock::time_point{seconds{closeTime}};
     }
 
@@ -96,7 +101,7 @@ CreateLedgerHeader(std::string_view ledgerHash, ripple::LedgerIndex seq, std::op
 }
 
 ripple::LedgerHeader
-CreateLedgerHeaderWithUnixTime(std::string_view ledgerHash, ripple::LedgerIndex seq, uint64_t closeTimeUnixStamp)
+createLedgerHeaderWithUnixTime(std::string_view ledgerHash, ripple::LedgerIndex seq, uint64_t closeTimeUnixStamp)
 {
     using namespace std::chrono;
 
@@ -104,14 +109,14 @@ CreateLedgerHeaderWithUnixTime(std::string_view ledgerHash, ripple::LedgerIndex 
     ledgerHeader.hash = ripple::uint256{ledgerHash};
     ledgerHeader.seq = seq;
 
-    auto const closeTime = closeTimeUnixStamp - seconds{rippleEpochStart}.count();
+    auto const closeTime = closeTimeUnixStamp - seconds{kRIPPLE_EPOCH_START}.count();
     ledgerHeader.closeTime = ripple::NetClock::time_point{seconds{closeTime}};
 
     return ledgerHeader;
 }
 
 ripple::STObject
-CreateLegacyFeeSettingLedgerObject(
+createLegacyFeeSettingLedgerObject(
     uint64_t base,
     uint32_t reserveInc,
     uint32_t reserveBase,
@@ -130,7 +135,7 @@ CreateLegacyFeeSettingLedgerObject(
 }
 
 ripple::STObject
-CreateFeeSettingLedgerObject(
+createFeeSettingLedgerObject(
     ripple::STAmount base,
     ripple::STAmount reserveInc,
     ripple::STAmount reserveBase,
@@ -147,21 +152,21 @@ CreateFeeSettingLedgerObject(
 }
 
 ripple::Blob
-CreateLegacyFeeSettingBlob(uint64_t base, uint32_t reserveInc, uint32_t reserveBase, uint32_t refFeeUnit, uint32_t flag)
+createLegacyFeeSettingBlob(uint64_t base, uint32_t reserveInc, uint32_t reserveBase, uint32_t refFeeUnit, uint32_t flag)
 {
-    auto lo = CreateLegacyFeeSettingLedgerObject(base, reserveInc, reserveBase, refFeeUnit, flag);
+    auto lo = createLegacyFeeSettingLedgerObject(base, reserveInc, reserveBase, refFeeUnit, flag);
     return lo.getSerializer().peekData();
 }
 
 ripple::Blob
-CreateFeeSettingBlob(ripple::STAmount base, ripple::STAmount reserveInc, ripple::STAmount reserveBase, uint32_t flag)
+createFeeSettingBlob(ripple::STAmount base, ripple::STAmount reserveInc, ripple::STAmount reserveBase, uint32_t flag)
 {
-    auto lo = CreateFeeSettingLedgerObject(base, reserveInc, reserveBase, flag);
+    auto lo = createFeeSettingLedgerObject(base, reserveInc, reserveBase, flag);
     return lo.getSerializer().peekData();
 }
 
 ripple::STObject
-CreatePaymentTransactionObject(
+createPaymentTransactionObject(
     std::string_view accountId1,
     std::string_view accountId2,
     int amount,
@@ -185,7 +190,7 @@ CreatePaymentTransactionObject(
 }
 
 ripple::STObject
-CreatePaymentTransactionMetaObject(
+createPaymentTransactionMetaObject(
     std::string_view accountId1,
     std::string_view accountId2,
     int finalBalance1,
@@ -194,11 +199,11 @@ CreatePaymentTransactionMetaObject(
 )
 {
     ripple::STObject finalFields(ripple::sfFinalFields);
-    finalFields.setAccountID(ripple::sfAccount, GetAccountIDWithString(accountId1));
+    finalFields.setAccountID(ripple::sfAccount, getAccountIdWithString(accountId1));
     finalFields.setFieldAmount(ripple::sfBalance, ripple::STAmount(finalBalance1));
 
     ripple::STObject finalFields2(ripple::sfFinalFields);
-    finalFields2.setAccountID(ripple::sfAccount, GetAccountIDWithString(accountId2));
+    finalFields2.setAccountID(ripple::sfAccount, getAccountIdWithString(accountId2));
     finalFields2.setFieldAmount(ripple::sfBalance, ripple::STAmount(finalBalance2));
 
     ripple::STObject metaObj(ripple::sfTransactionMetaData);
@@ -218,10 +223,10 @@ CreatePaymentTransactionMetaObject(
 }
 
 ripple::STObject
-CreateDidObject(std::string_view accountId, std::string_view didDoc, std::string_view uri, std::string_view data)
+createDidObject(std::string_view accountId, std::string_view didDoc, std::string_view uri, std::string_view data)
 {
     ripple::STObject did(ripple::sfLedgerEntry);
-    did.setAccountID(ripple::sfAccount, GetAccountIDWithString(accountId));
+    did.setAccountID(ripple::sfAccount, getAccountIdWithString(accountId));
     did.setFieldU16(ripple::sfLedgerEntryType, ripple::ltDID);
     did.setFieldU32(ripple::sfFlags, 0);
     did.setFieldU64(ripple::sfOwnerNode, 0);
@@ -237,7 +242,7 @@ CreateDidObject(std::string_view accountId, std::string_view didDoc, std::string
 }
 
 ripple::STObject
-CreateAccountRootObject(
+createAccountRootObject(
     std::string_view accountId,
     uint32_t flag,
     uint32_t seq,
@@ -245,24 +250,29 @@ CreateAccountRootObject(
     uint32_t ownerCount,
     std::string_view previousTxnID,
     uint32_t previousTxnSeq,
-    uint32_t transferRate
+    uint32_t transferRate,
+    std::optional<ripple::uint256> ammID
 )
 {
     ripple::STObject accountRoot(ripple::sfAccount);
     accountRoot.setFieldU16(ripple::sfLedgerEntryType, ripple::ltACCOUNT_ROOT);
     accountRoot.setFieldU32(ripple::sfFlags, flag);
-    accountRoot.setAccountID(ripple::sfAccount, GetAccountIDWithString(accountId));
+    accountRoot.setAccountID(ripple::sfAccount, getAccountIdWithString(accountId));
     accountRoot.setFieldU32(ripple::sfSequence, seq);
     accountRoot.setFieldAmount(ripple::sfBalance, ripple::STAmount(balance, false));
     accountRoot.setFieldU32(ripple::sfOwnerCount, ownerCount);
     accountRoot.setFieldH256(ripple::sfPreviousTxnID, ripple::uint256{previousTxnID});
     accountRoot.setFieldU32(ripple::sfPreviousTxnLgrSeq, previousTxnSeq);
     accountRoot.setFieldU32(ripple::sfTransferRate, transferRate);
+
+    if (ammID)
+        accountRoot.setFieldH256(ripple::sfAMMID, *ammID);
+
     return accountRoot;
 }
 
 ripple::STObject
-CreateCreateOfferTransactionObject(
+createCreateOfferTransactionObject(
     std::string_view accountId,
     int fee,
     uint32_t seq,
@@ -299,7 +309,7 @@ CreateCreateOfferTransactionObject(
 }
 
 ripple::Issue
-GetIssue(std::string_view currency, std::string_view issuerId)
+getIssue(std::string_view currency, std::string_view issuerId)
 {
     // standard currency
     if (currency.size() == 3) {
@@ -314,23 +324,26 @@ GetIssue(std::string_view currency, std::string_view issuerId)
 }
 
 ripple::STObject
-CreateMetaDataForBookChange(
+createMetaDataForBookChange(
     std::string_view currency,
     std::string_view issueId,
     uint32_t transactionIndex,
     int finalTakerGets,
-    int perviousTakerGets,
+    int previousTakerGets,
     int finalTakerPays,
-    int perviousTakerPays
+    int previousTakerPays,
+    std::optional<std::string_view> domain
 )
 {
     ripple::STObject finalFields(ripple::sfFinalFields);
-    ripple::Issue const issue1 = GetIssue(currency, issueId);
+    ripple::Issue const issue1 = getIssue(currency, issueId);
     finalFields.setFieldAmount(ripple::sfTakerPays, ripple::STAmount(issue1, finalTakerPays));
     finalFields.setFieldAmount(ripple::sfTakerGets, ripple::STAmount(finalTakerGets, false));
+    if (domain.has_value())
+        finalFields.setFieldH256(ripple::sfDomainID, ripple::uint256{*domain});
     ripple::STObject previousFields(ripple::sfPreviousFields);
-    previousFields.setFieldAmount(ripple::sfTakerPays, ripple::STAmount(issue1, perviousTakerPays));
-    previousFields.setFieldAmount(ripple::sfTakerGets, ripple::STAmount(perviousTakerGets, false));
+    previousFields.setFieldAmount(ripple::sfTakerPays, ripple::STAmount(issue1, previousTakerPays));
+    previousFields.setFieldAmount(ripple::sfTakerGets, ripple::STAmount(previousTakerGets, false));
     ripple::STObject metaObj(ripple::sfTransactionMetaData);
     ripple::STArray metaArray{1};
     ripple::STObject node(ripple::sfModifiedNode);
@@ -345,7 +358,7 @@ CreateMetaDataForBookChange(
 }
 
 ripple::STObject
-CreateMetaDataForCreateOffer(
+createMetaDataForCreateOffer(
     std::string_view currency,
     std::string_view issueId,
     uint32_t transactionIndex,
@@ -355,7 +368,7 @@ CreateMetaDataForCreateOffer(
 )
 {
     ripple::STObject finalFields(ripple::sfNewFields);
-    ripple::Issue const issue1 = GetIssue(currency, issueId);
+    ripple::Issue const issue1 = getIssue(currency, issueId);
     if (reverse) {
         finalFields.setFieldAmount(ripple::sfTakerGets, ripple::STAmount(issue1, finalTakerPays));
         finalFields.setFieldAmount(ripple::sfTakerPays, ripple::STAmount(finalTakerGets, false));
@@ -376,7 +389,7 @@ CreateMetaDataForCreateOffer(
 }
 
 ripple::STObject
-CreateMetaDataForCancelOffer(
+createMetaDataForCancelOffer(
     std::string_view currency,
     std::string_view issueId,
     uint32_t transactionIndex,
@@ -385,7 +398,7 @@ CreateMetaDataForCancelOffer(
 )
 {
     ripple::STObject finalFields(ripple::sfFinalFields);
-    ripple::Issue const issue1 = GetIssue(currency, issueId);
+    ripple::Issue const issue1 = getIssue(currency, issueId);
     finalFields.setFieldAmount(ripple::sfTakerPays, ripple::STAmount(issue1, finalTakerPays));
     finalFields.setFieldAmount(ripple::sfTakerGets, ripple::STAmount(finalTakerGets, false));
     ripple::STObject metaObj(ripple::sfTransactionMetaData);
@@ -401,7 +414,7 @@ CreateMetaDataForCancelOffer(
 }
 
 ripple::STObject
-CreateOwnerDirLedgerObject(std::vector<ripple::uint256> indexes, std::string_view rootIndex)
+createOwnerDirLedgerObject(std::vector<ripple::uint256> indexes, std::string_view rootIndex)
 {
     ripple::STObject ownerDir(ripple::sfLedgerEntry);
     ownerDir.setFieldU16(ripple::sfLedgerEntryType, ripple::ltDIR_NODE);
@@ -412,7 +425,7 @@ CreateOwnerDirLedgerObject(std::vector<ripple::uint256> indexes, std::string_vie
 }
 
 ripple::STObject
-CreatePaymentChannelLedgerObject(
+createPaymentChannelLedgerObject(
     std::string_view accountId,
     std::string_view destId,
     int amount,
@@ -424,8 +437,8 @@ CreatePaymentChannelLedgerObject(
 {
     ripple::STObject channel(ripple::sfLedgerEntry);
     channel.setFieldU16(ripple::sfLedgerEntryType, ripple::ltPAYCHAN);
-    channel.setAccountID(ripple::sfAccount, GetAccountIDWithString(accountId));
-    channel.setAccountID(ripple::sfDestination, GetAccountIDWithString(destId));
+    channel.setAccountID(ripple::sfAccount, getAccountIdWithString(accountId));
+    channel.setAccountID(ripple::sfDestination, getAccountIdWithString(destId));
     channel.setFieldAmount(ripple::sfAmount, ripple::STAmount(amount, false));
     channel.setFieldAmount(ripple::sfBalance, ripple::STAmount(balance, false));
     channel.setFieldU32(ripple::sfSettleDelay, settleDelay);
@@ -441,7 +454,7 @@ CreatePaymentChannelLedgerObject(
 }
 
 [[nodiscard]] ripple::STObject
-CreateRippleStateLedgerObject(
+createRippleStateLedgerObject(
     std::string_view currency,
     std::string_view issuerId,
     int balance,
@@ -457,16 +470,16 @@ CreateRippleStateLedgerObject(
     auto line = ripple::STObject(ripple::sfLedgerEntry);
     line.setFieldU16(ripple::sfLedgerEntryType, ripple::ltRIPPLE_STATE);
     line.setFieldU32(ripple::sfFlags, flag);
-    line.setFieldAmount(ripple::sfBalance, ripple::STAmount(GetIssue(currency, issuerId), balance));
-    line.setFieldAmount(ripple::sfHighLimit, ripple::STAmount(GetIssue(currency, highNodeAccountId), highLimit));
-    line.setFieldAmount(ripple::sfLowLimit, ripple::STAmount(GetIssue(currency, lowNodeAccountId), lowLimit));
+    line.setFieldAmount(ripple::sfBalance, ripple::STAmount(getIssue(currency, issuerId), balance));
+    line.setFieldAmount(ripple::sfHighLimit, ripple::STAmount(getIssue(currency, highNodeAccountId), highLimit));
+    line.setFieldAmount(ripple::sfLowLimit, ripple::STAmount(getIssue(currency, lowNodeAccountId), lowLimit));
     line.setFieldH256(ripple::sfPreviousTxnID, ripple::uint256{previousTxnId});
     line.setFieldU32(ripple::sfPreviousTxnLgrSeq, previousTxnSeq);
     return line;
 }
 
 ripple::STObject
-CreateOfferLedgerObject(
+createOfferLedgerObject(
     std::string_view account,
     int takerGets,
     int takerPays,
@@ -474,17 +487,18 @@ CreateOfferLedgerObject(
     std::string_view paysCurrency,
     std::string_view getsIssueId,
     std::string_view paysIssueId,
-    std::string_view dirId
+    std::string_view dirId,
+    std::optional<std::string_view> domain
 )
 {
     ripple::STObject offer(ripple::sfLedgerEntry);
     offer.setFieldU16(ripple::sfLedgerEntryType, ripple::ltOFFER);
-    offer.setAccountID(ripple::sfAccount, GetAccountIDWithString(account));
+    offer.setAccountID(ripple::sfAccount, getAccountIdWithString(account));
     offer.setFieldU32(ripple::sfSequence, 0);
     offer.setFieldU32(ripple::sfFlags, 0);
-    ripple::Issue const issue1 = GetIssue(getsCurrency, getsIssueId);
+    ripple::Issue const issue1 = getIssue(getsCurrency, getsIssueId);
     offer.setFieldAmount(ripple::sfTakerGets, ripple::STAmount(issue1, takerGets));
-    ripple::Issue const issue2 = GetIssue(paysCurrency, paysIssueId);
+    ripple::Issue const issue2 = getIssue(paysCurrency, paysIssueId);
     offer.setFieldAmount(ripple::sfTakerPays, ripple::STAmount(issue2, takerPays));
     offer.setFieldH256(ripple::sfBookDirectory, ripple::uint256{});
     offer.setFieldU64(ripple::sfBookNode, 0);
@@ -492,15 +506,17 @@ CreateOfferLedgerObject(
     offer.setFieldH256(ripple::sfBookDirectory, ripple::uint256{dirId});
     offer.setFieldH256(ripple::sfPreviousTxnID, ripple::uint256{});
     offer.setFieldU32(ripple::sfPreviousTxnLgrSeq, 0);
+    if (domain.has_value())
+        offer.setFieldH256(ripple::sfDomainID, ripple::uint256{*domain});
     return offer;
 }
 
 ripple::STObject
-CreateTicketLedgerObject(std::string_view account, uint32_t sequence)
+createTicketLedgerObject(std::string_view account, uint32_t sequence)
 {
     ripple::STObject ticket(ripple::sfLedgerEntry);
     ticket.setFieldU16(ripple::sfLedgerEntryType, ripple::ltTICKET);
-    ticket.setAccountID(ripple::sfAccount, GetAccountIDWithString(account));
+    ticket.setAccountID(ripple::sfAccount, getAccountIdWithString(account));
     ticket.setFieldU32(ripple::sfFlags, 0);
     ticket.setFieldU64(ripple::sfOwnerNode, 0);
     ticket.setFieldU32(ripple::sfTicketSequence, sequence);
@@ -510,12 +526,12 @@ CreateTicketLedgerObject(std::string_view account, uint32_t sequence)
 }
 
 ripple::STObject
-CreateEscrowLedgerObject(std::string_view account, std::string_view dest)
+createEscrowLedgerObject(std::string_view account, std::string_view dest)
 {
     ripple::STObject escrow(ripple::sfLedgerEntry);
     escrow.setFieldU16(ripple::sfLedgerEntryType, ripple::ltESCROW);
-    escrow.setAccountID(ripple::sfAccount, GetAccountIDWithString(account));
-    escrow.setAccountID(ripple::sfDestination, GetAccountIDWithString(dest));
+    escrow.setAccountID(ripple::sfAccount, getAccountIdWithString(account));
+    escrow.setAccountID(ripple::sfDestination, getAccountIdWithString(dest));
     escrow.setFieldAmount(ripple::sfAmount, ripple::STAmount(0, false));
     escrow.setFieldU64(ripple::sfOwnerNode, 0);
     escrow.setFieldH256(ripple::sfPreviousTxnID, ripple::uint256{});
@@ -525,12 +541,12 @@ CreateEscrowLedgerObject(std::string_view account, std::string_view dest)
 }
 
 ripple::STObject
-CreateCheckLedgerObject(std::string_view account, std::string_view dest)
+createCheckLedgerObject(std::string_view account, std::string_view dest)
 {
     ripple::STObject check(ripple::sfLedgerEntry);
     check.setFieldU16(ripple::sfLedgerEntryType, ripple::ltCHECK);
-    check.setAccountID(ripple::sfAccount, GetAccountIDWithString(account));
-    check.setAccountID(ripple::sfDestination, GetAccountIDWithString(dest));
+    check.setAccountID(ripple::sfAccount, getAccountIdWithString(account));
+    check.setAccountID(ripple::sfDestination, getAccountIdWithString(dest));
     check.setFieldU32(ripple::sfFlags, 0);
     check.setFieldU64(ripple::sfOwnerNode, 0);
     check.setFieldU64(ripple::sfDestinationNode, 0);
@@ -542,12 +558,12 @@ CreateCheckLedgerObject(std::string_view account, std::string_view dest)
 }
 
 ripple::STObject
-CreateDepositPreauthLedgerObjectByAuth(std::string_view account, std::string_view auth)
+createDepositPreauthLedgerObjectByAuth(std::string_view account, std::string_view auth)
 {
     ripple::STObject depositPreauth(ripple::sfLedgerEntry);
     depositPreauth.setFieldU16(ripple::sfLedgerEntryType, ripple::ltDEPOSIT_PREAUTH);
-    depositPreauth.setAccountID(ripple::sfAccount, GetAccountIDWithString(account));
-    depositPreauth.setAccountID(ripple::sfAuthorize, GetAccountIDWithString(auth));
+    depositPreauth.setAccountID(ripple::sfAccount, getAccountIdWithString(account));
+    depositPreauth.setAccountID(ripple::sfAuthorize, getAccountIdWithString(auth));
     depositPreauth.setFieldU32(ripple::sfFlags, 0);
     depositPreauth.setFieldU64(ripple::sfOwnerNode, 0);
     depositPreauth.setFieldH256(ripple::sfPreviousTxnID, ripple::uint256{});
@@ -556,7 +572,7 @@ CreateDepositPreauthLedgerObjectByAuth(std::string_view account, std::string_vie
 }
 
 ripple::STObject
-CreateDepositPreauthLedgerObjectByAuthCredentials(
+createDepositPreauthLedgerObjectByAuthCredentials(
     std::string_view account,
     std::string_view issuer,
     std::string_view credType
@@ -564,10 +580,10 @@ CreateDepositPreauthLedgerObjectByAuthCredentials(
 {
     ripple::STObject depositPreauth(ripple::sfLedgerEntry);
     depositPreauth.setFieldU16(ripple::sfLedgerEntryType, ripple::ltDEPOSIT_PREAUTH);
-    depositPreauth.setAccountID(ripple::sfAccount, GetAccountIDWithString(account));
+    depositPreauth.setAccountID(ripple::sfAccount, getAccountIdWithString(account));
     depositPreauth.setFieldArray(
         ripple::sfAuthorizeCredentials,
-        CreateAuthCredentialArray(std::vector<std::string_view>{issuer}, std::vector<std::string_view>{credType})
+        createAuthCredentialArray(std::vector<std::string_view>{issuer}, std::vector<std::string_view>{credType})
     );
     depositPreauth.setFieldU32(ripple::sfFlags, 0);
     depositPreauth.setFieldU64(ripple::sfOwnerNode, 0);
@@ -577,29 +593,13 @@ CreateDepositPreauthLedgerObjectByAuthCredentials(
 }
 
 data::NFT
-CreateNFT(std::string_view tokenID, std::string_view account, ripple::LedgerIndex seq, ripple::Blob uri, bool isBurned)
+createNft(std::string_view tokenID, std::string_view account, ripple::LedgerIndex seq, ripple::Blob uri, bool isBurned)
 {
-    return data::NFT{ripple::uint256(tokenID), seq, GetAccountIDWithString(account), uri, isBurned};
+    return data::NFT{ripple::uint256(tokenID), seq, getAccountIdWithString(account), uri, isBurned};
 }
 
 ripple::STObject
-CreateNFTBuyOffer(std::string_view tokenID, std::string_view account)
-{
-    ripple::STObject offer(ripple::sfLedgerEntry);
-    offer.setFieldH256(ripple::sfNFTokenID, ripple::uint256{tokenID});
-    offer.setFieldU16(ripple::sfLedgerEntryType, ripple::ltNFTOKEN_OFFER);
-    offer.setFieldU32(ripple::sfFlags, 0u);
-    offer.setFieldAmount(ripple::sfAmount, ripple::STAmount{123});
-    offer.setFieldU64(ripple::sfOwnerNode, 0ul);
-    offer.setAccountID(ripple::sfOwner, GetAccountIDWithString(account));
-    offer.setFieldH256(ripple::sfPreviousTxnID, ripple::uint256{});
-    offer.setFieldU32(ripple::sfPreviousTxnLgrSeq, 0u);
-    offer.setFieldU64(ripple::sfNFTokenOfferNode, 0ul);
-    return offer;
-}
-
-ripple::STObject
-CreateNFTSellOffer(std::string_view tokenID, std::string_view account)
+createNftBuyOffer(std::string_view tokenID, std::string_view account)
 {
     ripple::STObject offer(ripple::sfLedgerEntry);
     offer.setFieldH256(ripple::sfNFTokenID, ripple::uint256{tokenID});
@@ -607,7 +607,7 @@ CreateNFTSellOffer(std::string_view tokenID, std::string_view account)
     offer.setFieldU32(ripple::sfFlags, 0u);
     offer.setFieldAmount(ripple::sfAmount, ripple::STAmount{123});
     offer.setFieldU64(ripple::sfOwnerNode, 0ul);
-    offer.setAccountID(ripple::sfOwner, GetAccountIDWithString(account));
+    offer.setAccountID(ripple::sfOwner, getAccountIdWithString(account));
     offer.setFieldH256(ripple::sfPreviousTxnID, ripple::uint256{});
     offer.setFieldU32(ripple::sfPreviousTxnLgrSeq, 0u);
     offer.setFieldU64(ripple::sfNFTokenOfferNode, 0ul);
@@ -615,7 +615,23 @@ CreateNFTSellOffer(std::string_view tokenID, std::string_view account)
 }
 
 ripple::STObject
-CreateSignerLists(std::vector<std::pair<std::string, uint32_t>> const& signers)
+createNftSellOffer(std::string_view tokenID, std::string_view account)
+{
+    ripple::STObject offer(ripple::sfLedgerEntry);
+    offer.setFieldH256(ripple::sfNFTokenID, ripple::uint256{tokenID});
+    offer.setFieldU16(ripple::sfLedgerEntryType, ripple::ltNFTOKEN_OFFER);
+    offer.setFieldU32(ripple::sfFlags, 0u);
+    offer.setFieldAmount(ripple::sfAmount, ripple::STAmount{123});
+    offer.setFieldU64(ripple::sfOwnerNode, 0ul);
+    offer.setAccountID(ripple::sfOwner, getAccountIdWithString(account));
+    offer.setFieldH256(ripple::sfPreviousTxnID, ripple::uint256{});
+    offer.setFieldU32(ripple::sfPreviousTxnLgrSeq, 0u);
+    offer.setFieldU64(ripple::sfNFTokenOfferNode, 0ul);
+    return offer;
+}
+
+ripple::STObject
+createSignerLists(std::vector<std::pair<std::string, uint32_t>> const& signers)
 {
     auto signerlists = ripple::STObject(ripple::sfLedgerEntry);
     signerlists.setFieldU16(ripple::sfLedgerEntryType, ripple::ltSIGNER_LIST);
@@ -628,7 +644,7 @@ CreateSignerLists(std::vector<std::pair<std::string, uint32_t>> const& signers)
     ripple::STArray list;
     for (auto const& signer : signers) {
         auto entry = ripple::STObject(ripple::sfSignerEntry);
-        entry.setAccountID(ripple::sfAccount, GetAccountIDWithString(signer.first));
+        entry.setAccountID(ripple::sfAccount, getAccountIdWithString(signer.first));
         entry.setFieldU16(ripple::sfSignerWeight, signer.second);
         quorum += signer.second;
         list.push_back(std::move(entry));
@@ -639,7 +655,7 @@ CreateSignerLists(std::vector<std::pair<std::string, uint32_t>> const& signers)
 }
 
 ripple::STObject
-CreateNFTTokenPage(
+createNftTokenPage(
     std::vector<std::pair<std::string, std::string>> const& tokens,
     std::optional<ripple::uint256> previousPage
 )
@@ -663,7 +679,7 @@ CreateNFTTokenPage(
 }
 
 data::TransactionAndMetadata
-CreateMintNFTTxWithMetadata(
+createMintNftTxWithMetadata(
     std::string_view accountId,
     uint32_t seq,
     uint32_t fee,
@@ -692,25 +708,25 @@ CreateMintNFTTxWithMetadata(
     node.setFieldU16(ripple::sfLedgerEntryType, ripple::ltNFTOKEN_PAGE);
 
     ripple::STObject finalFields(ripple::sfFinalFields);
-    ripple::STArray NFTArray1{2};
+    ripple::STArray nftArray1{2};
 
     // finalFields contain new NFT while previousFields does not
     auto entry = ripple::STObject(ripple::sfNFToken);
     entry.setFieldH256(ripple::sfNFTokenID, ripple::uint256{nftID});
     char const* url = "testurl";
     entry.setFieldVL(ripple::sfURI, ripple::Slice(url, 7));
-    NFTArray1.push_back(entry);
+    nftArray1.push_back(entry);
 
     auto entry2 = ripple::STObject(ripple::sfNFToken);
-    entry2.setFieldH256(ripple::sfNFTokenID, ripple::uint256{INDEX1});
+    entry2.setFieldH256(ripple::sfNFTokenID, ripple::uint256{kINDEX1});
     entry2.setFieldVL(ripple::sfURI, ripple::Slice(url, 7));
-    NFTArray1.push_back(entry2);
+    nftArray1.push_back(entry2);
 
-    finalFields.setFieldArray(ripple::sfNFTokens, NFTArray1);
+    finalFields.setFieldArray(ripple::sfNFTokens, nftArray1);
 
-    NFTArray1.erase(NFTArray1.begin());
+    nftArray1.erase(nftArray1.begin());
     ripple::STObject previousFields(ripple::sfPreviousFields);
-    previousFields.setFieldArray(ripple::sfNFTokens, NFTArray1);
+    previousFields.setFieldArray(ripple::sfNFTokens, nftArray1);
 
     node.emplace_back(std::move(finalFields));
     node.emplace_back(std::move(previousFields));
@@ -726,7 +742,230 @@ CreateMintNFTTxWithMetadata(
 }
 
 data::TransactionAndMetadata
-CreateAcceptNFTOfferTxWithMetadata(std::string_view accountId, uint32_t seq, uint32_t fee, std::string_view nftId)
+createMintNftTxWithMetadataOfCreatedNode(
+    std::string_view accountId,
+    uint32_t seq,
+    uint32_t fee,
+    uint32_t nfTokenTaxon,
+    std::optional<std::string_view> nftID,
+    std::optional<std::string_view> uri,
+    std::optional<std::string_view> pageIndex
+)
+{
+    // tx
+    ripple::STObject tx(ripple::sfTransaction);
+    tx.setFieldU16(ripple::sfTransactionType, ripple::ttNFTOKEN_MINT);
+    auto account = util::parseBase58Wrapper<ripple::AccountID>(std::string(accountId));
+    tx.setAccountID(ripple::sfAccount, account.value());
+    auto amount = ripple::STAmount(fee, false);
+    tx.setFieldAmount(ripple::sfFee, amount);
+    // required field for ttNFTOKEN_MINT
+    tx.setFieldU32(ripple::sfNFTokenTaxon, nfTokenTaxon);
+    tx.setFieldU32(ripple::sfSequence, seq);
+    char const* key = "test";
+    ripple::Slice const slice(key, 4);
+    tx.setFieldVL(ripple::sfSigningPubKey, slice);
+    if (uri)
+        tx.setFieldVL(ripple::sfURI, ripple::Slice(uri->data(), uri->size()));
+
+    // meta
+    ripple::STObject metaObj(ripple::sfTransactionMetaData);
+    ripple::STArray metaArray{1};
+    ripple::STObject node(ripple::sfCreatedNode);
+    node.setFieldU16(ripple::sfLedgerEntryType, ripple::ltNFTOKEN_PAGE);
+
+    ripple::STObject newFields(ripple::sfNewFields);
+    ripple::STArray nftArray1{1};
+
+    if (nftID) {
+        // finalFields contain new NFT while previousFields does not
+        auto entry = ripple::STObject(ripple::sfNFToken);
+        entry.setFieldH256(ripple::sfNFTokenID, ripple::uint256{*nftID});
+        if (uri)
+            entry.setFieldVL(ripple::sfURI, ripple::Slice(uri->data(), uri->size()));
+
+        nftArray1.push_back(entry);
+    }
+    newFields.setFieldArray(ripple::sfNFTokens, nftArray1);
+    node.emplace_back(std::move(newFields));
+    if (pageIndex)
+        node.setFieldH256(ripple::sfLedgerIndex, ripple::uint256{*pageIndex});
+
+    // add a ledger object ahead of nft page
+    ripple::STObject node2(ripple::sfCreatedNode);
+    node2.setFieldU16(ripple::sfLedgerEntryType, ripple::ltACCOUNT_ROOT);
+    metaArray.push_back(node2);
+
+    metaArray.push_back(node);
+
+    metaObj.setFieldArray(ripple::sfAffectedNodes, metaArray);
+    metaObj.setFieldU8(ripple::sfTransactionResult, ripple::tesSUCCESS);
+    metaObj.setFieldU32(ripple::sfTransactionIndex, 0);
+
+    data::TransactionAndMetadata ret;
+    ret.transaction = tx.getSerializer().peekData();
+    ret.metadata = metaObj.getSerializer().peekData();
+    return ret;
+}
+
+data::TransactionAndMetadata
+createNftModifyTxWithMetadata(std::string_view accountId, std::string_view nftID, ripple::Blob uri)
+{
+    // tx
+    ripple::STObject tx(ripple::sfTransaction);
+    tx.setFieldU16(ripple::sfTransactionType, ripple::ttNFTOKEN_MODIFY);
+    auto account = ripple::parseBase58<ripple::AccountID>(std::string(accountId));
+    tx.setAccountID(ripple::sfAccount, account.value());
+    auto amount = ripple::STAmount(10, false);
+    tx.setFieldAmount(ripple::sfFee, amount);
+    tx.setFieldH256(ripple::sfNFTokenID, ripple::uint256{nftID});
+    tx.setFieldU32(ripple::sfSequence, 100);
+    char const* key = "test";
+    ripple::Slice const slice(key, 4);
+    tx.setFieldVL(ripple::sfSigningPubKey, slice);
+
+    if (!uri.empty())  // sfURI should be absent if empty
+        tx.setFieldVL(ripple::sfURI, uri);
+
+    // meta
+    ripple::STObject metaObj(ripple::sfTransactionMetaData);
+    ripple::STArray metaArray{1};
+    ripple::STObject node(ripple::sfModifiedNode);
+    node.setFieldU16(ripple::sfLedgerEntryType, ripple::ltNFTOKEN_PAGE);
+
+    ripple::STObject finalFields(ripple::sfFinalFields);
+    ripple::STArray nftArray1{1};
+    ripple::STArray nftArray2{1};
+
+    // finalFields contain new NFT while previousFields does not
+    auto entry = ripple::STObject(ripple::sfNFToken);
+    entry.setFieldH256(ripple::sfNFTokenID, ripple::uint256{nftID});
+    if (!uri.empty())
+        entry.setFieldVL(ripple::sfURI, uri);
+    nftArray1.push_back(entry);
+
+    auto entry2 = ripple::STObject(ripple::sfNFToken);
+    entry2.setFieldH256(ripple::sfNFTokenID, ripple::uint256{nftID});
+    char const* url = "previous";
+    entry2.setFieldVL(ripple::sfURI, ripple::Slice(url, 7));
+    nftArray2.push_back(entry2);
+
+    finalFields.setFieldArray(ripple::sfNFTokens, nftArray1);
+
+    ripple::STObject previousFields(ripple::sfPreviousFields);
+    previousFields.setFieldArray(ripple::sfNFTokens, nftArray2);
+
+    node.emplace_back(std::move(finalFields));
+    node.emplace_back(std::move(previousFields));
+    metaArray.push_back(node);
+    metaObj.setFieldArray(ripple::sfAffectedNodes, metaArray);
+    metaObj.setFieldU8(ripple::sfTransactionResult, ripple::tesSUCCESS);
+    metaObj.setFieldU32(ripple::sfTransactionIndex, 0);
+
+    data::TransactionAndMetadata ret;
+    ret.transaction = tx.getSerializer().peekData();
+    ret.metadata = metaObj.getSerializer().peekData();
+    return ret;
+}
+
+data::TransactionAndMetadata
+createNftBurnTxWithMetadataOfDeletedNode(std::string_view accountId, std::string_view nftID)
+{
+    // tx
+    ripple::STObject tx(ripple::sfTransaction);
+    tx.setFieldU16(ripple::sfTransactionType, ripple::ttNFTOKEN_BURN);
+    auto account = getAccountIdWithString(accountId);
+    tx.setAccountID(ripple::sfAccount, account);
+    auto amount = ripple::STAmount(10, false);
+    tx.setFieldAmount(ripple::sfFee, amount);
+    tx.setFieldH256(ripple::sfNFTokenID, ripple::uint256{nftID});
+    tx.setFieldU32(ripple::sfSequence, 100);
+    char const* key = "test";
+    ripple::Slice const slice(key, 4);
+    tx.setFieldVL(ripple::sfSigningPubKey, slice);
+
+    // meta
+    ripple::STObject metaObj(ripple::sfTransactionMetaData);
+    ripple::STArray metaArray{1};
+    ripple::STObject node(ripple::sfDeletedNode);
+    node.setFieldU16(ripple::sfLedgerEntryType, ripple::ltNFTOKEN_PAGE);
+    // deleted node should contain finalFields
+    ripple::STObject finalFields(ripple::sfFinalFields);
+    ripple::STArray nftArray{1};
+    auto entry = ripple::STObject(ripple::sfNFToken);
+    entry.setFieldH256(ripple::sfNFTokenID, ripple::uint256{nftID});
+    nftArray.push_back(entry);
+    finalFields.setFieldArray(ripple::sfNFTokens, nftArray);
+
+    node.emplace_back(std::move(finalFields));
+
+    // add a ledger object ahead of nft page
+    ripple::STObject node2(ripple::sfCreatedNode);
+    node2.setFieldU16(ripple::sfLedgerEntryType, ripple::ltACCOUNT_ROOT);
+    metaArray.push_back(node2);
+
+    metaArray.push_back(node);
+    metaObj.setFieldArray(ripple::sfAffectedNodes, metaArray);
+    metaObj.setFieldU8(ripple::sfTransactionResult, ripple::tesSUCCESS);
+    metaObj.setFieldU32(ripple::sfTransactionIndex, 0);
+
+    data::TransactionAndMetadata ret;
+    ret.transaction = tx.getSerializer().peekData();
+    ret.metadata = metaObj.getSerializer().peekData();
+    return ret;
+}
+
+data::TransactionAndMetadata
+createNftBurnTxWithMetadataOfModifiedNode(std::string_view accountId, std::string_view nftID)
+{
+    // tx
+    ripple::STObject tx(ripple::sfTransaction);
+    tx.setFieldU16(ripple::sfTransactionType, ripple::ttNFTOKEN_BURN);
+    auto account = getAccountIdWithString(accountId);
+    tx.setAccountID(ripple::sfAccount, account);
+    auto amount = ripple::STAmount(10, false);
+    tx.setFieldAmount(ripple::sfFee, amount);
+    tx.setFieldH256(ripple::sfNFTokenID, ripple::uint256{nftID});
+    tx.setFieldU32(ripple::sfSequence, 100);
+    char const* key = "test";
+    ripple::Slice const slice(key, 4);
+    tx.setFieldVL(ripple::sfSigningPubKey, slice);
+
+    // meta
+    ripple::STObject metaObj(ripple::sfTransactionMetaData);
+    ripple::STArray metaArray{1};
+    ripple::STObject node(ripple::sfModifiedNode);
+    node.setFieldU16(ripple::sfLedgerEntryType, ripple::ltNFTOKEN_PAGE);
+
+    ripple::STObject finalFields(ripple::sfFinalFields);
+    ripple::STArray nftArray{1};
+    ripple::STObject previousFields(ripple::sfPreviousFields);
+    auto entry = ripple::STObject(ripple::sfNFToken);
+    entry.setFieldH256(ripple::sfNFTokenID, ripple::uint256{nftID});
+    nftArray.push_back(entry);
+    previousFields.setFieldArray(ripple::sfNFTokens, nftArray);
+
+    node.emplace_back(std::move(previousFields));
+    node.emplace_back(std::move(finalFields));
+    metaArray.push_back(node);
+    metaObj.setFieldArray(ripple::sfAffectedNodes, metaArray);
+    metaObj.setFieldU8(ripple::sfTransactionResult, ripple::tesSUCCESS);
+    metaObj.setFieldU32(ripple::sfTransactionIndex, 0);
+
+    data::TransactionAndMetadata ret;
+    ret.transaction = tx.getSerializer().peekData();
+    ret.metadata = metaObj.getSerializer().peekData();
+    return ret;
+}
+
+data::TransactionAndMetadata
+createAcceptNftBuyerOfferTxWithMetadata(
+    std::string_view accountId,
+    uint32_t seq,
+    uint32_t fee,
+    std::string_view nftId,
+    std::string_view offerId
+)
 {
     // tx
     ripple::STObject tx(ripple::sfTransaction);
@@ -736,7 +975,7 @@ CreateAcceptNFTOfferTxWithMetadata(std::string_view accountId, uint32_t seq, uin
     auto amount = ripple::STAmount(fee, false);
     tx.setFieldAmount(ripple::sfFee, amount);
     tx.setFieldU32(ripple::sfSequence, seq);
-    tx.setFieldH256(ripple::sfNFTokenBuyOffer, ripple::uint256{INDEX1});
+    tx.setFieldH256(ripple::sfNFTokenBuyOffer, ripple::uint256{offerId});
     char const* key = "test";
     ripple::Slice const slice(key, 4);
     tx.setFieldVL(ripple::sfSigningPubKey, slice);
@@ -750,9 +989,105 @@ CreateAcceptNFTOfferTxWithMetadata(std::string_view accountId, uint32_t seq, uin
 
     ripple::STObject finalFields(ripple::sfFinalFields);
     finalFields.setFieldH256(ripple::sfNFTokenID, ripple::uint256{nftId});
+    // for buyer offer, the offer owner is the nft's new owner
+    finalFields.setAccountID(ripple::sfOwner, account.value());
 
     node.emplace_back(std::move(finalFields));
+    node.setFieldH256(ripple::sfLedgerIndex, ripple::uint256{offerId});
     metaArray.push_back(node);
+    metaObj.setFieldArray(ripple::sfAffectedNodes, metaArray);
+    metaObj.setFieldU8(ripple::sfTransactionResult, ripple::tesSUCCESS);
+    metaObj.setFieldU32(ripple::sfTransactionIndex, 0);
+
+    data::TransactionAndMetadata ret;
+    ret.transaction = tx.getSerializer().peekData();
+    ret.metadata = metaObj.getSerializer().peekData();
+    return ret;
+}
+
+data::TransactionAndMetadata
+createAcceptNftSellerOfferTxWithMetadata(
+    std::string_view accountId,
+    uint32_t seq,
+    uint32_t fee,
+    std::string_view nftId,
+    std::string_view offerId,
+    std::string_view pageIndex,
+    bool isNewPageCreated
+)
+{
+    // tx
+    ripple::STObject tx(ripple::sfTransaction);
+    tx.setFieldU16(ripple::sfTransactionType, ripple::ttNFTOKEN_ACCEPT_OFFER);
+    auto account = util::parseBase58Wrapper<ripple::AccountID>(std::string(accountId));
+    tx.setAccountID(ripple::sfAccount, account.value());
+    auto amount = ripple::STAmount(fee, false);
+    tx.setFieldAmount(ripple::sfFee, amount);
+    tx.setFieldU32(ripple::sfSequence, seq);
+    tx.setFieldH256(ripple::sfNFTokenSellOffer, ripple::uint256{offerId});
+    char const* key = "test";
+    ripple::Slice const slice(key, 4);
+    tx.setFieldVL(ripple::sfSigningPubKey, slice);
+
+    // meta
+    // create deletedNode with ltNFTOKEN_OFFER
+    ripple::STObject metaObj(ripple::sfTransactionMetaData);
+    ripple::STArray metaArray{1};
+    ripple::STObject node(ripple::sfDeletedNode);
+    node.setFieldU16(ripple::sfLedgerEntryType, ripple::ltNFTOKEN_OFFER);
+
+    ripple::STObject finalFields(ripple::sfFinalFields);
+    finalFields.setFieldH256(ripple::sfNFTokenID, ripple::uint256{nftId});
+    // offer owner is not the nft's new owner for seller offer, we need to create other nodes for processing new owner
+    finalFields.setAccountID(ripple::sfOwner, account.value());
+
+    node.emplace_back(finalFields);
+    node.setFieldH256(ripple::sfLedgerIndex, ripple::uint256{offerId});
+    metaArray.push_back(node);
+
+    // new owner's nft page node changed: 1 new nft page node added 2 old nft page node modified
+    if (isNewPageCreated) {
+        ripple::STObject node2(ripple::sfCreatedNode);
+        node2.setFieldU16(ripple::sfLedgerEntryType, ripple::ltNFTOKEN_PAGE);
+
+        ripple::STObject newFields(ripple::sfNewFields);
+        ripple::STArray nftArray1{1};
+
+        auto entry = ripple::STObject(ripple::sfNFToken);
+        entry.setFieldH256(ripple::sfNFTokenID, ripple::uint256{nftId});
+        nftArray1.push_back(entry);
+
+        newFields.setFieldArray(ripple::sfNFTokens, nftArray1);
+        node2.emplace_back(std::move(newFields));
+        node2.setFieldH256(ripple::sfLedgerIndex, ripple::uint256{pageIndex});
+        metaArray.push_back(node2);
+    } else {
+        ripple::STObject node2(ripple::sfModifiedNode);
+        node2.setFieldU16(ripple::sfLedgerEntryType, ripple::ltNFTOKEN_PAGE);
+
+        ripple::STArray nftArray1{2};
+
+        // finalFields contain new NFT while previousFields does not
+        auto entry = ripple::STObject(ripple::sfNFToken);
+        entry.setFieldH256(ripple::sfNFTokenID, ripple::uint256{nftId});
+        nftArray1.push_back(entry);
+
+        auto entry2 = ripple::STObject(ripple::sfNFToken);
+        entry2.setFieldH256(ripple::sfNFTokenID, ripple::uint256{kINDEX1});
+        nftArray1.push_back(entry2);
+
+        finalFields.setFieldArray(ripple::sfNFTokens, nftArray1);
+
+        nftArray1.erase(nftArray1.begin());
+        ripple::STObject previousFields(ripple::sfPreviousFields);
+        previousFields.setFieldArray(ripple::sfNFTokens, nftArray1);
+
+        node2.emplace_back(std::move(finalFields));
+        node2.emplace_back(std::move(previousFields));
+        node2.setFieldH256(ripple::sfLedgerIndex, ripple::uint256{pageIndex});
+        metaArray.push_back(node2);
+    }
+
     metaObj.setFieldArray(ripple::sfAffectedNodes, metaArray);
     metaObj.setFieldU8(ripple::sfTransactionResult, ripple::tesSUCCESS);
     metaObj.setFieldU32(ripple::sfTransactionIndex, 0);
@@ -765,7 +1100,7 @@ CreateAcceptNFTOfferTxWithMetadata(std::string_view accountId, uint32_t seq, uin
 
 // NFTokenCancelOffer can be used to cancel multiple offers
 data::TransactionAndMetadata
-CreateCancelNFTOffersTxWithMetadata(
+createCancelNftOffersTxWithMetadata(
     std::string_view accountId,
     uint32_t seq,
     uint32_t fee,
@@ -817,7 +1152,7 @@ CreateCancelNFTOffersTxWithMetadata(
 }
 
 data::TransactionAndMetadata
-CreateCreateNFTOfferTxWithMetadata(
+createCreateNftOfferTxWithMetadata(
     std::string_view accountId,
     uint32_t seq,
     uint32_t fee,
@@ -862,7 +1197,7 @@ CreateCreateNFTOfferTxWithMetadata(
 }
 
 data::TransactionAndMetadata
-CreateOracleSetTxWithMetadata(
+createOracleSetTxWithMetadata(
     std::string_view accountId,
     uint32_t seq,
     uint32_t fee,
@@ -915,7 +1250,7 @@ CreateOracleSetTxWithMetadata(
 }
 
 ripple::STObject
-CreateAmendmentsObject(std::vector<ripple::uint256> const& enabledAmendments)
+createAmendmentsObject(std::vector<ripple::uint256> const& enabledAmendments)
 {
     auto amendments = ripple::STObject(ripple::sfLedgerEntry);
     amendments.setFieldU16(ripple::sfLedgerEntryType, ripple::ltAMENDMENTS);
@@ -926,7 +1261,7 @@ CreateAmendmentsObject(std::vector<ripple::uint256> const& enabledAmendments)
 }
 
 ripple::STObject
-CreateBrokenAmendmentsObject()
+createBrokenAmendmentsObject()
 {
     auto amendments = ripple::STObject(ripple::sfLedgerEntry);
     amendments.setFieldU16(ripple::sfLedgerEntryType, ripple::ltAMENDMENTS);
@@ -936,7 +1271,7 @@ CreateBrokenAmendmentsObject()
 }
 
 ripple::STObject
-CreateAMMObject(
+createAmmObject(
     std::string_view accountId,
     std::string_view assetCurrency,
     std::string_view assetIssuer,
@@ -950,11 +1285,11 @@ CreateAMMObject(
 {
     auto amm = ripple::STObject(ripple::sfLedgerEntry);
     amm.setFieldU16(ripple::sfLedgerEntryType, ripple::ltAMM);
-    amm.setAccountID(ripple::sfAccount, GetAccountIDWithString(accountId));
+    amm.setAccountID(ripple::sfAccount, getAccountIdWithString(accountId));
     amm.setFieldU16(ripple::sfTradingFee, tradingFee);
     amm.setFieldU64(ripple::sfOwnerNode, ownerNode);
-    amm.setFieldIssue(ripple::sfAsset, ripple::STIssue{ripple::sfAsset, GetIssue(assetCurrency, assetIssuer)});
-    amm.setFieldIssue(ripple::sfAsset2, ripple::STIssue{ripple::sfAsset2, GetIssue(asset2Currency, asset2Issuer)});
+    amm.setFieldIssue(ripple::sfAsset, ripple::STIssue{ripple::sfAsset, getIssue(assetCurrency, assetIssuer)});
+    amm.setFieldIssue(ripple::sfAsset2, ripple::STIssue{ripple::sfAsset2, getIssue(asset2Currency, asset2Issuer)});
     ripple::Issue const issue1(
         ripple::Currency{lpTokenBalanceIssueCurrency},
         util::parseBase58Wrapper<ripple::AccountID>(std::string(accountId)).value()
@@ -965,7 +1300,7 @@ CreateAMMObject(
 }
 
 ripple::STObject
-CreateBridgeObject(
+createBridgeObject(
     std::string_view accountId,
     std::string_view lockingDoor,
     std::string_view issuingDoor,
@@ -975,7 +1310,7 @@ CreateBridgeObject(
 {
     auto bridge = ripple::STObject(ripple::sfLedgerEntry);
     bridge.setFieldU16(ripple::sfLedgerEntryType, ripple::ltBRIDGE);
-    bridge.setAccountID(ripple::sfAccount, GetAccountIDWithString(accountId));
+    bridge.setAccountID(ripple::sfAccount, getAccountIdWithString(accountId));
     bridge.setFieldAmount(ripple::sfSignatureReward, ripple::STAmount(10, false));
     bridge.setFieldU64(ripple::sfXChainClaimID, 100);
     bridge.setFieldU64(ripple::sfXChainAccountCreateCount, 100);
@@ -991,9 +1326,9 @@ CreateBridgeObject(
     issuingIssue["issuer"] = std::string(issuingIssuer);
 
     bridge[ripple::sfXChainBridge] = ripple::STXChainBridge(
-        GetAccountIDWithString(lockingDoor),
+        getAccountIdWithString(lockingDoor),
         ripple::issueFromJson(lockingIssue),
-        GetAccountIDWithString(issuingDoor),
+        getAccountIdWithString(issuingDoor),
         ripple::issueFromJson(issuingIssue)
     );
     bridge.setFieldU32(ripple::sfFlags, 0);
@@ -1001,7 +1336,7 @@ CreateBridgeObject(
 }
 
 ripple::STObject
-CreateChainOwnedClaimIDObject(
+createChainOwnedClaimIdObject(
     std::string_view accountId,
     std::string_view lockingDoor,
     std::string_view issuingDoor,
@@ -1012,7 +1347,7 @@ CreateChainOwnedClaimIDObject(
 {
     auto chainOwnedClaimID = ripple::STObject(ripple::sfLedgerEntry);
     chainOwnedClaimID.setFieldU16(ripple::sfLedgerEntryType, ripple::ltXCHAIN_OWNED_CLAIM_ID);
-    chainOwnedClaimID.setAccountID(ripple::sfAccount, GetAccountIDWithString(accountId));
+    chainOwnedClaimID.setAccountID(ripple::sfAccount, getAccountIdWithString(accountId));
     chainOwnedClaimID.setFieldAmount(ripple::sfSignatureReward, ripple::STAmount(10, false));
     chainOwnedClaimID.setFieldU64(ripple::sfXChainClaimID, 100);
     chainOwnedClaimID.setFieldU64(ripple::sfOwnerNode, 100);
@@ -1026,19 +1361,19 @@ CreateChainOwnedClaimIDObject(
     issuingIssue["issuer"] = std::string(issuingIssuer);
 
     chainOwnedClaimID[ripple::sfXChainBridge] = ripple::STXChainBridge(
-        GetAccountIDWithString(lockingDoor),
+        getAccountIdWithString(lockingDoor),
         ripple::issueFromJson(lockingIssue),
-        GetAccountIDWithString(issuingDoor),
+        getAccountIdWithString(issuingDoor),
         ripple::issueFromJson(issuingIssue)
     );
     chainOwnedClaimID.setFieldU32(ripple::sfFlags, 0);
-    chainOwnedClaimID.setAccountID(ripple::sfOtherChainSource, GetAccountIDWithString(otherChainSource));
+    chainOwnedClaimID.setAccountID(ripple::sfOtherChainSource, getAccountIdWithString(otherChainSource));
     chainOwnedClaimID.setFieldArray(ripple::sfXChainClaimAttestations, ripple::STArray{});
     return chainOwnedClaimID;
 }
 
 ripple::STObject
-CreateChainOwnedCreateAccountClaimID(
+createChainOwnedCreateAccountClaimId(
     std::string_view accountId,
     std::string_view lockingDoor,
     std::string_view issuingDoor,
@@ -1048,7 +1383,7 @@ CreateChainOwnedCreateAccountClaimID(
 {
     auto chainOwnedCreateAccountClaimID = ripple::STObject(ripple::sfLedgerEntry);
     chainOwnedCreateAccountClaimID.setFieldU16(ripple::sfLedgerEntryType, ripple::ltXCHAIN_OWNED_CLAIM_ID);
-    chainOwnedCreateAccountClaimID.setAccountID(ripple::sfAccount, GetAccountIDWithString(accountId));
+    chainOwnedCreateAccountClaimID.setAccountID(ripple::sfAccount, getAccountIdWithString(accountId));
     chainOwnedCreateAccountClaimID.setFieldU64(ripple::sfXChainAccountCreateCount, 100);
     chainOwnedCreateAccountClaimID.setFieldU64(ripple::sfOwnerNode, 100);
     chainOwnedCreateAccountClaimID.setFieldH256(ripple::sfPreviousTxnID, ripple::uint256{});
@@ -1061,9 +1396,9 @@ CreateChainOwnedCreateAccountClaimID(
     issuingIssue["issuer"] = std::string(issuingIssuer);
 
     chainOwnedCreateAccountClaimID[ripple::sfXChainBridge] = ripple::STXChainBridge(
-        GetAccountIDWithString(lockingDoor),
+        getAccountIdWithString(lockingDoor),
         ripple::issueFromJson(lockingIssue),
-        GetAccountIDWithString(issuingDoor),
+        getAccountIdWithString(issuingDoor),
         ripple::issueFromJson(issuingIssue)
     );
     chainOwnedCreateAccountClaimID.setFieldU32(ripple::sfFlags, 0);
@@ -1072,7 +1407,7 @@ CreateChainOwnedCreateAccountClaimID(
 }
 
 void
-AMMAddVoteSlot(ripple::STObject& amm, ripple::AccountID const& accountId, uint16_t tradingFee, uint32_t voteWeight)
+ammAddVoteSlot(ripple::STObject& amm, ripple::AccountID const& accountId, uint16_t tradingFee, uint32_t voteWeight)
 {
     if (!amm.isFieldPresent(ripple::sfVoteSlots))
         amm.setFieldArray(ripple::sfVoteSlots, ripple::STArray{});
@@ -1086,7 +1421,7 @@ AMMAddVoteSlot(ripple::STObject& amm, ripple::AccountID const& accountId, uint16
 }
 
 void
-AMMSetAuctionSlot(
+ammSetAuctionSlot(
     ripple::STObject& amm,
     ripple::AccountID const& accountId,
     ripple::STAmount price,
@@ -1120,7 +1455,7 @@ AMMSetAuctionSlot(
 }
 
 ripple::Currency
-CreateLPTCurrency(std::string_view assetCurrency, std::string_view asset2Currency)
+createLptCurrency(std::string_view assetCurrency, std::string_view asset2Currency)
 {
     return ripple::ammLPTCurrency(
         ripple::to_currency(std::string(assetCurrency)), ripple::to_currency(std::string(asset2Currency))
@@ -1128,10 +1463,10 @@ CreateLPTCurrency(std::string_view assetCurrency, std::string_view asset2Currenc
 }
 
 ripple::STObject
-CreateMPTIssuanceObject(std::string_view accountId, std::uint32_t seq, std::string_view metadata)
+createMptIssuanceObject(std::string_view accountId, std::uint32_t seq, std::string_view metadata)
 {
     ripple::STObject mptIssuance(ripple::sfLedgerEntry);
-    mptIssuance.setAccountID(ripple::sfIssuer, GetAccountIDWithString(accountId));
+    mptIssuance.setAccountID(ripple::sfIssuer, getAccountIdWithString(accountId));
     mptIssuance.setFieldU16(ripple::sfLedgerEntryType, ripple::ltMPTOKEN_ISSUANCE);
     mptIssuance.setFieldU32(ripple::sfFlags, 0);
     mptIssuance.setFieldU32(ripple::sfSequence, seq);
@@ -1147,10 +1482,10 @@ CreateMPTIssuanceObject(std::string_view accountId, std::uint32_t seq, std::stri
 }
 
 ripple::STObject
-CreateMPTokenObject(std::string_view accountId, ripple::uint192 issuanceID, std::uint64_t mptAmount)
+createMpTokenObject(std::string_view accountId, ripple::uint192 issuanceID, std::uint64_t mptAmount)
 {
     ripple::STObject mptoken(ripple::sfLedgerEntry);
-    mptoken.setAccountID(ripple::sfAccount, GetAccountIDWithString(accountId));
+    mptoken.setAccountID(ripple::sfAccount, getAccountIdWithString(accountId));
     mptoken[ripple::sfMPTokenIssuanceID] = issuanceID;
     mptoken.setFieldU16(ripple::sfLedgerEntryType, ripple::ltMPTOKEN);
     mptoken.setFieldU32(ripple::sfFlags, 0);
@@ -1165,7 +1500,56 @@ CreateMPTokenObject(std::string_view accountId, ripple::uint192 issuanceID, std:
 }
 
 ripple::STObject
-CreateOraclePriceData(
+createPermissionedDomainObject(
+    std::string_view accountId,
+    std::string_view ledgerIndex,
+    ripple::LedgerIndex seq,
+    uint64_t ownerNode,
+    ripple::uint256 previousTxId,
+    uint32_t previousTxSeq
+)
+{
+    ripple::STObject object(ripple::sfLedgerEntry);
+    object.setFieldH256(ripple::sfLedgerIndex, ripple::uint256(ledgerIndex));
+    object.setAccountID(ripple::sfOwner, getAccountIdWithString(accountId));
+    object.setFieldU32(ripple::sfSequence, seq);
+    object.setFieldArray(ripple::sfAcceptedCredentials, ripple::STArray{});
+    object.setFieldU64(ripple::sfOwnerNode, ownerNode);
+    object.setFieldH256(ripple::sfPreviousTxnID, previousTxId);
+    object.setFieldU32(ripple::sfPreviousTxnLgrSeq, previousTxSeq);
+    object.setFieldU32(ripple::sfFlags, 0);
+    object.setFieldU16(ripple::sfLedgerEntryType, ripple::ltPERMISSIONED_DOMAIN);
+
+    return object;
+}
+
+ripple::STObject
+createDelegateObject(
+    std::string_view accountId,
+    std::string_view authorize,
+    std::string_view ledgerIndex,
+    uint64_t ownerNode,
+    ripple::uint256 previousTxId,
+    uint32_t previousTxSeq
+)
+{
+    ripple::STObject object(ripple::sfLedgerEntry);
+
+    object.setFieldH256(ripple::sfLedgerIndex, ripple::uint256(ledgerIndex));
+    object.setFieldU16(ripple::sfLedgerEntryType, ripple::ltDELEGATE);
+    object.setAccountID(ripple::sfAccount, getAccountIdWithString(accountId));
+    object.setAccountID(ripple::sfAuthorize, getAccountIdWithString(authorize));
+    object.setFieldArray(ripple::sfPermissions, ripple::STArray{});
+    object.setFieldU64(ripple::sfOwnerNode, ownerNode);
+    object.setFieldH256(ripple::sfPreviousTxnID, previousTxId);
+    object.setFieldU32(ripple::sfPreviousTxnLgrSeq, previousTxSeq);
+    object.setFieldU32(ripple::sfFlags, 0);
+
+    return object;
+}
+
+ripple::STObject
+createOraclePriceData(
     uint64_t assetPrice,
     ripple::Currency baseAssetCurrency,
     ripple::Currency quoteAssetCurrency,
@@ -1182,13 +1566,13 @@ CreateOraclePriceData(
 }
 
 ripple::STArray
-CreatePriceDataSeries(std::vector<ripple::STObject> const& series)
+createPriceDataSeries(std::vector<ripple::STObject> const& series)
 {
     return ripple::STArray{series.begin(), series.end()};
 }
 
 ripple::STObject
-CreateOracleObject(
+createOracleObject(
     std::string_view accountId,
     std::string_view provider,
     uint64_t ownerNode,
@@ -1203,7 +1587,7 @@ CreateOracleObject(
     auto ledgerObject = ripple::STObject(ripple::sfLedgerEntry);
     ledgerObject.setFieldU16(ripple::sfLedgerEntryType, ripple::ltORACLE);
     ledgerObject.setFieldU32(ripple::sfFlags, 0);
-    ledgerObject.setAccountID(ripple::sfOwner, GetAccountIDWithString(accountId));
+    ledgerObject.setAccountID(ripple::sfOwner, getAccountIdWithString(accountId));
     ledgerObject.setFieldVL(ripple::sfProvider, ripple::Blob{provider.begin(), provider.end()});
     ledgerObject.setFieldU64(ripple::sfOwnerNode, ownerNode);
     ledgerObject.setFieldU32(ripple::sfLastUpdateTime, lastUpdateTime);
@@ -1218,7 +1602,7 @@ CreateOracleObject(
 
 // acc2 issue credential for acc1 so acc2 is issuer
 ripple::STObject
-CreateCredentialObject(
+createCredentialObject(
     std::string_view acc1,
     std::string_view acc2,
     std::string_view credType,
@@ -1229,8 +1613,8 @@ CreateCredentialObject(
     ripple::STObject credObj(ripple::sfCredential);
     credObj.setFieldU16(ripple::sfLedgerEntryType, ripple::ltCREDENTIAL);
     credObj.setFieldVL(ripple::sfCredentialType, ripple::Blob{credType.begin(), credType.end()});
-    credObj.setAccountID(ripple::sfSubject, GetAccountIDWithString(acc1));
-    credObj.setAccountID(ripple::sfIssuer, GetAccountIDWithString(acc2));
+    credObj.setAccountID(ripple::sfSubject, getAccountIdWithString(acc1));
+    credObj.setAccountID(ripple::sfIssuer, getAccountIdWithString(acc2));
     if (expiration.has_value())
         credObj.setFieldU32(ripple::sfExpiration, expiration.value());
 
@@ -1247,15 +1631,49 @@ CreateCredentialObject(
 }
 
 ripple::STArray
-CreateAuthCredentialArray(std::vector<std::string_view> issuer, std::vector<std::string_view> credType)
+createAuthCredentialArray(std::vector<std::string_view> issuer, std::vector<std::string_view> credType)
 {
     ripple::STArray arr;
     ASSERT(issuer.size() == credType.size(), "issuer and credtype vector must be same length");
     for (std::size_t i = 0; i < issuer.size(); ++i) {
         auto credential = ripple::STObject::makeInnerObject(ripple::sfCredential);
-        credential.setAccountID(ripple::sfIssuer, GetAccountIDWithString(issuer[i]));
+        credential.setAccountID(ripple::sfIssuer, getAccountIdWithString(issuer[i]));
         credential.setFieldVL(ripple::sfCredentialType, ripple::strUnHex(std::string(credType[i])).value());
         arr.push_back(credential);
     }
     return arr;
+}
+
+ripple::STObject
+createVault(
+    std::string_view owner,
+    std::string_view account,
+    ripple::LedgerIndex seq,
+    std::string_view assetCurrency,
+    std::string_view assetIssuer,
+    ripple::uint192 shareMPTID,
+    uint64_t ownerNode,
+    ripple::uint256 previousTxId,
+    uint32_t previousTxSeq
+)
+{
+    auto vault = ripple::STObject(ripple::sfLedgerEntry);
+    vault.setAccountID(ripple::sfOwner, getAccountIdWithString(owner));
+    vault.setAccountID(ripple::sfAccount, getAccountIdWithString(account));
+    vault.setFieldU32(ripple::sfSequence, seq);
+    vault.setFieldU64(ripple::sfOwnerNode, ownerNode);
+    vault.setFieldH256(ripple::sfPreviousTxnID, previousTxId);
+    vault.setFieldU32(ripple::sfPreviousTxnLgrSeq, previousTxSeq);
+
+    vault.setFieldIssue(ripple::sfAsset, ripple::STIssue{ripple::sfAsset, getIssue(assetCurrency, assetIssuer)});
+    vault[ripple::sfShareMPTID] = shareMPTID;
+    vault.setFieldNumber(ripple::sfAssetsTotal, ripple::STNumber{ripple::sfAssetsTotal, 300});
+    vault.setFieldNumber(ripple::sfAssetsAvailable, ripple::STNumber{ripple::sfAssetsAvailable, 300});
+    vault.setFieldNumber(ripple::sfLossUnrealized, ripple::STNumber{ripple::sfLossUnrealized, 0});
+    vault.setFieldU8(ripple::sfWithdrawalPolicy, 200);
+
+    vault.setFieldU32(ripple::sfFlags, 0);
+    vault.setFieldU16(ripple::sfLedgerEntryType, ripple::ltVAULT);
+
+    return vault;
 }

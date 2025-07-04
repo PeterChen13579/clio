@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "data/AmendmentCenterInterface.hpp"
 #include "data/BackendInterface.hpp"
 #include "rpc/JS.hpp"
 #include "rpc/common/Checkers.hpp"
@@ -35,6 +36,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace rpc {
 
@@ -45,6 +47,7 @@ namespace rpc {
  */
 class LedgerHandler {
     std::shared_ptr<BackendInterface> sharedPtrBackend_;
+    std::shared_ptr<data::AmendmentCenterInterface const> amendmentCenter_;
 
 public:
     /**
@@ -89,8 +92,13 @@ public:
      * @brief Construct a new LedgerHandler object
      *
      * @param sharedPtrBackend The backend to use
+     * @param amendmentCenter The amendmentCenter to use
      */
-    LedgerHandler(std::shared_ptr<BackendInterface> const& sharedPtrBackend) : sharedPtrBackend_(sharedPtrBackend)
+    LedgerHandler(
+        std::shared_ptr<BackendInterface> const& sharedPtrBackend,
+        std::shared_ptr<data::AmendmentCenterInterface const> amendmentCenter
+    )
+        : sharedPtrBackend_(sharedPtrBackend), amendmentCenter_(std::move(amendmentCenter))
     {
     }
 
@@ -103,15 +111,15 @@ public:
     static RpcSpecConstRef
     spec([[maybe_unused]] uint32_t apiVersion)
     {
-        static auto const rpcSpec = RpcSpec{
+        static auto const kRPC_SPEC = RpcSpec{
             {JS(full), validation::Type<bool>{}, validation::NotSupported{true}},
             {JS(full), check::Deprecated{}},
             {JS(accounts), validation::Type<bool>{}, validation::NotSupported{true}},
             {JS(accounts), check::Deprecated{}},
             {JS(owner_funds), validation::Type<bool>{}},
             {JS(queue), validation::Type<bool>{}, validation::NotSupported{true}},
-            {JS(ledger_hash), validation::CustomValidators::Uint256HexStringValidator},
-            {JS(ledger_index), validation::CustomValidators::LedgerIndexValidator},
+            {JS(ledger_hash), validation::CustomValidators::uint256HexStringValidator},
+            {JS(ledger_index), validation::CustomValidators::ledgerIndexValidator},
             {JS(transactions), validation::Type<bool>{}},
             {JS(expand), validation::Type<bool>{}},
             {JS(binary), validation::Type<bool>{}},
@@ -120,7 +128,7 @@ public:
             {JS(type), check::Deprecated{}},
         };
 
-        return rpcSpec;
+        return kRPC_SPEC;
     }
 
     /**

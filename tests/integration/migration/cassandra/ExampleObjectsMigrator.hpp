@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of clio: https://github.com/XRPLF/clio
-    Copyright (c) 2022-2024, the clio developers.
+    Copyright (c) 2024, the clio developers.
 
     Permission to use, copy, modify, and distribute this software for any
     purpose with or without fee is hereby granted, provided that the above
@@ -20,7 +20,7 @@
 #pragma once
 
 #include "migration/cassandra/CassandraMigrationTestBackend.hpp"
-#include "util/newconfig/ObjectView.hpp"
+#include "util/config/ObjectView.hpp"
 
 #include <xrpl/protocol/STLedgerEntry.h>
 #include <xrpl/protocol/STObject.h>
@@ -35,8 +35,8 @@
 struct ExampleObjectsMigrator {
     using Backend = CassandraMigrationTestBackend;
 
-    static constexpr char const* name = "ExampleObjectsMigrator";
-    static constexpr char const* description = "The migrator for objects table";
+    static constexpr char const* kNAME = "ExampleObjectsMigrator";
+    static constexpr char const* kDESCRIPTION = "The migrator for objects table";
 
     static std::atomic_int64_t count;
     static std::atomic_int64_t accountCount;

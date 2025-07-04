@@ -19,8 +19,11 @@
 
 #pragma once
 
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/associated_executor.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/spawn.hpp>
+#include <boost/asio/steady_timer.hpp>
 
 #include <atomic>
 #include <memory>

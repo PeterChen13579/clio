@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "util/MockAmendmentCenter.hpp"
 #include "util/MockBackendTestFixture.hpp"
 #include "util/MockPrometheus.hpp"
 #include "util/MockWsBase.hpp"
@@ -34,15 +35,19 @@
 #include <utility>
 
 // Base class for feed tests, providing easy way to access the received feed
+// The interface for matchers is from gtest so we don't want to change the casing
+// NOLINTBEGIN(readability-identifier-naming)
+
 template <typename TestedFeed>
 struct FeedBaseTest : util::prometheus::WithPrometheus, MockBackendTest, SyncExecutionCtxFixture {
 protected:
     web::SubscriptionContextPtr sessionPtr = std::make_shared<MockSession>();
-    std::shared_ptr<TestedFeed> testFeedPtr = std::make_shared<TestedFeed>(ctx);
+    std::shared_ptr<TestedFeed> testFeedPtr = std::make_shared<TestedFeed>(ctx_);
     MockSession* mockSessionPtr = dynamic_cast<MockSession*>(sessionPtr.get());
+    StrictMockAmendmentCenterSharedPtr mockAmendmentCenterPtr_;
 };
 
-namespace impl {
+namespace feed::impl {
 class SharedStringJsonEqMatcher {
     std::string expected_;
 
@@ -71,10 +76,12 @@ public:
         *os << "Expecting json " << expected_;
     }
 };
-}  // namespace impl
+}  // namespace feed::impl
+
+// NOLINTEND(readability-identifier-naming)
 
 inline ::testing::Matcher<std::shared_ptr<std::string>>
-SharedStringJsonEq(std::string const& expected)
+sharedStringJsonEq(std::string const& expected)
 {
-    return impl::SharedStringJsonEqMatcher(expected);
+    return feed::impl::SharedStringJsonEqMatcher(expected);
 }

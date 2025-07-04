@@ -20,6 +20,7 @@
 #pragma once
 
 #include "util/async/Concepts.hpp"
+#include "util/async/Operation.hpp"
 #include "util/async/context/impl/Cancellation.hpp"
 #include "util/async/context/impl/Execution.hpp"
 #include "util/async/context/impl/Timer.hpp"
@@ -45,13 +46,14 @@ class BasicStrand {
     friend AssociatedExecutorExtractor;
 
 public:
-    static constexpr bool isNoexcept = noexcept(ErrorHandlerType::wrap([](auto&) { throw 0; }));
+    static constexpr bool kIS_NOEXCEPT = noexcept(ErrorHandlerType::wrap([](auto&) { throw 0; }));
 
     using ContextHolderType = typename ParentContextType::ContextHolderType::Strand;
     using ExecutorType = typename ContextHolderType::Executor;
     using StopToken = typename StopSourceType::Token;
     using Timer =
         typename ParentContextType::ContextHolderType::Timer;  // timers are associated with the parent context
+    using RepeatedOperation = RepeatingOperation<BasicStrand>;
 
     BasicStrand(ParentContextType& parent, auto&& strand)
         : parentContext_{std::ref(parent)}, context_{std::forward<decltype(strand)>(strand)}
@@ -64,8 +66,10 @@ public:
     BasicStrand(BasicStrand const&) = delete;
 
     [[nodiscard]] auto
-    execute(SomeHandlerWith<StopToken> auto&& fn, std::optional<std::chrono::milliseconds> timeout = std::nullopt) const
-        noexcept(isNoexcept)
+    execute(
+        SomeHandlerWith<StopToken> auto&& fn,
+        std::optional<std::chrono::milliseconds> timeout = std::nullopt
+    ) noexcept(kIS_NOEXCEPT)
     {
         return DispatcherType::dispatch(
             context_,
@@ -89,7 +93,7 @@ public:
     }
 
     [[nodiscard]] auto
-    execute(SomeHandlerWith<StopToken> auto&& fn, SomeStdDuration auto timeout) const noexcept(isNoexcept)
+    execute(SomeHandlerWith<StopToken> auto&& fn, SomeStdDuration auto timeout) noexcept(kIS_NOEXCEPT)
     {
         return execute(
             std::forward<decltype(fn)>(fn),
@@ -98,7 +102,7 @@ public:
     }
 
     [[nodiscard]] auto
-    execute(SomeHandlerWithoutStopToken auto&& fn) const noexcept(isNoexcept)
+    execute(SomeHandlerWithoutStopToken auto&& fn) noexcept(kIS_NOEXCEPT)
     {
         return DispatcherType::dispatch(
             context_,
@@ -113,6 +117,16 @@ public:
                 }
             })
         );
+    }
+
+    [[nodiscard]] auto
+    executeRepeatedly(SomeStdDuration auto interval, SomeHandlerWithoutStopToken auto&& fn) noexcept(kIS_NOEXCEPT)
+    {
+        if constexpr (not std::is_same_v<decltype(TimerContextProvider::getContext(*this)), decltype(*this)>) {
+            return TimerContextProvider::getContext(*this).executeRepeatedly(interval, std::forward<decltype(fn)>(fn));
+        } else {
+            return RepeatedOperation(impl::extractAssociatedExecutor(*this), interval, std::forward<decltype(fn)>(fn));
+        }
     }
 };
 

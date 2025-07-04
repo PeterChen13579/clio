@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of clio: https://github.com/XRPLF/clio
-    Copyright (c) 2022-2024, the clio developers.
+    Copyright (c) 2024, the clio developers.
 
     Permission to use, copy, modify, and distribute this software for any
     purpose with or without fee is hereby granted, provided that the above
@@ -22,8 +22,8 @@
 #include "migration/MigratiorStatus.hpp"
 #include "migration/impl/MigrationManagerFactory.hpp"
 #include "util/OverloadSet.hpp"
+#include "util/config/ConfigDefinition.hpp"
 #include "util/log/Logger.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
 #include "util/prometheus/Prometheus.hpp"
 
 #include <cstdlib>
@@ -41,7 +41,7 @@ MigratorApplication::MigratorApplication(util::config::ClioConfigDefinition cons
 {
     PrometheusService::init(config);
 
-    auto expectedMigrationManager = migration::impl::makeMigrationManager(config);
+    auto expectedMigrationManager = migration::impl::makeMigrationManager(config, cache_);
 
     if (not expectedMigrationManager) {
         throw std::runtime_error("Failed to create migration manager: " + expectedMigrationManager.error());

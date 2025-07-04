@@ -19,8 +19,13 @@
 
 #pragma once
 
+#include "util/StopHelper.hpp"
+#include "util/StringHash.hpp"
 #include "util/Taggable.hpp"
 #include "util/log/Logger.hpp"
+#include "util/prometheus/Gauge.hpp"
+#include "util/prometheus/Label.hpp"
+#include "util/prometheus/Prometheus.hpp"
 #include "web/SubscriptionContextInterface.hpp"
 #include "web/ng/Connection.hpp"
 #include "web/ng/Error.hpp"
@@ -33,11 +38,13 @@
 #include <boost/signals2/signal.hpp>
 #include <boost/signals2/variadic_signal.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <unordered_map>
 
 namespace web::ng::impl {
@@ -45,20 +52,7 @@ namespace web::ng::impl {
 class ConnectionHandler {
 public:
     using OnDisconnectHook = std::function<void(Connection const&)>;
-
-    struct StringHash {
-        using hash_type = std::hash<std::string_view>;
-        using is_transparent = void;
-
-        std::size_t
-        operator()(char const* str) const;
-        std::size_t
-        operator()(std::string_view str) const;
-        std::size_t
-        operator()(std::string const& str) const;
-    };
-
-    using TargetToHandlerMap = std::unordered_map<std::string, MessageHandler, StringHash, std::equal_to<>>;
+    using TargetToHandlerMap = std::unordered_map<std::string, MessageHandler, util::StringHash, std::equal_to<>>;
 
 private:
     util::Logger log_{"WebServer"};
@@ -77,6 +71,12 @@ private:
     std::optional<MessageHandler> wsHandler_;
 
     boost::signals2::signal<void()> onStop_;
+    std::unique_ptr<std::atomic_bool> stopping_ = std::make_unique<std::atomic_bool>(false);
+
+    std::reference_wrapper<util::prometheus::GaugeInt> connectionsCounter_ =
+        PrometheusService::gaugeInt("connections_total_number", util::prometheus::Labels{{{"status", "connected"}}});
+
+    util::StopHelper stopHelper_;
 
 public:
     ConnectionHandler(
@@ -86,6 +86,10 @@ public:
         std::optional<size_t> maxSubscriptionSendQueueSize,
         OnDisconnectHook onDisconnectHook
     );
+
+    ConnectionHandler(ConnectionHandler&&) = delete;
+
+    static constexpr std::chrono::milliseconds kCLOSE_CONNECTION_TIMEOUT{500};
 
     void
     onGet(std::string const& target, MessageHandler handler);
@@ -99,8 +103,14 @@ public:
     void
     processConnection(ConnectionPtr connection, boost::asio::yield_context yield);
 
+    static void
+    stopConnection(Connection& connection, boost::asio::yield_context yield);
+
     void
-    stop();
+    stop(boost::asio::yield_context yield);
+
+    bool
+    isStopping() const;
 
 private:
     /**

@@ -17,11 +17,12 @@
 */
 //==============================================================================
 
+#include "util/MockAssert.hpp"
 #include "util/Taggable.hpp"
 #include "util/build/Build.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
-#include "util/newconfig/ConfigValue.hpp"
-#include "util/newconfig/Types.hpp"
+#include "util/config/ConfigDefinition.hpp"
+#include "util/config/ConfigValue.hpp"
+#include "util/config/Types.hpp"
 #include "web/ng/MockConnection.hpp"
 #include "web/ng/Request.hpp"
 #include "web/ng/Response.hpp"
@@ -45,24 +46,25 @@ using namespace web::ng;
 namespace http = boost::beast::http;
 using namespace util::config;
 
-struct ResponseDeathTest : testing::Test {};
+struct ResponseAssertTest : common::util::WithMockAssert {};
 
-TEST_F(ResponseDeathTest, intoHttpResponseWithoutHttpData)
+TEST_F(ResponseAssertTest, intoHttpResponseWithoutHttpData)
 {
     Request::HttpHeaders const headers{};
     Request const request{"some message", headers};
     Response response{boost::beast::http::status::ok, "message", request};
-    EXPECT_DEATH(std::move(response).intoHttpResponse(), "");
+    EXPECT_CLIO_ASSERT_FAIL(std::move(response).intoHttpResponse());
 }
 
-TEST_F(ResponseDeathTest, asConstBufferWithHttpData)
+TEST_F(ResponseAssertTest, asConstBufferWithHttpData)
 {
     Request const request{http::request<http::string_body>{http::verb::get, "/", 11}};
     Response const response{boost::beast::http::status::ok, "message", request};
-    EXPECT_DEATH(response.asWsResponse(), "");
+    EXPECT_CLIO_ASSERT_FAIL(response.asWsResponse());
 }
 
 struct ResponseTest : testing::Test {
+protected:
     int const httpVersion_ = 11;
     http::status const responseStatus_ = http::status::ok;
     Request::HttpHeaders const headers_;

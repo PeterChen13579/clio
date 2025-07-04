@@ -85,13 +85,10 @@ public:
             );
         }
 
-        std::vector<ripple::uint256> cursors{data::firstKey};
-        rg::copy(
-            liveCursors | vs::take(static_cast<int>(std::min(liveCursors.size(), numCursors_))),
-            std::back_inserter(cursors)
-        );
+        std::vector<ripple::uint256> cursors{data::kFIRST_KEY};
+        rg::copy(liveCursors | vs::take(std::min(liveCursors.size(), numCursors_)), std::back_inserter(cursors));
         rg::sort(cursors);
-        cursors.push_back(data::lastKey);
+        cursors.push_back(data::kLAST_KEY);
 
         std::vector<CursorPair> pairs;
         pairs.reserve(cursors.size());

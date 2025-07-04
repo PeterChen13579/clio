@@ -1,0 +1,117 @@
+name: Make release
+
+on:
+  workflow_call:
+    inputs:
+      overwrite_release:
+        description: "Overwrite the current release and tag"
+        required: true
+        type: boolean
+
+      title:
+        description: "Release title"
+        required: true
+        type: string
+
+      version:
+        description: "Release version"
+        required: true
+        type: string
+
+      header:
+        description: "Release notes header"
+        required: true
+        type: string
+
+      generate_changelog:
+        description: "Generate changelog"
+        required: false
+        type: boolean
+
+      draft:
+        description: "Create a draft release"
+        required: false
+        type: boolean
+
+jobs:
+  release:
+    runs-on: heavy
+    container:
+      image: ghcr.io/xrplf/clio-ci:latest
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare runner
+        uses: ./.github/actions/prepare_runner
+        with:
+          disable_ccache: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: release_artifacts
+          pattern: clio_server_*
+
+      - name: Create release notes
+        shell: bash
+        run: |
+          printf '%s\n' "${{ inputs.header }}" > "${RUNNER_TEMP}/release_notes.md"
+
+      - name: Generate changelog
+        shell: bash
+        if: ${{ inputs.generate_changelog }}
+        run: |
+          LAST_TAG=$(gh release view --json tagName -q .tagName)
+          LAST_TAG_COMMIT=$(git rev-parse $LAST_TAG)
+          BASE_COMMIT=$(git merge-base HEAD $LAST_TAG_COMMIT)
+          git-cliff "${BASE_COMMIT}..HEAD" --ignore-tags "nightly|-b"
+          cat CHANGELOG.md >> "${RUNNER_TEMP}/release_notes.md"
+
+      - name: Prepare release artifacts
+        shell: bash
+        run: .github/scripts/prepare-release-artifacts.sh release_artifacts
+
+      - name: Append sha256 checksums
+        shell: bash
+        working-directory: release_artifacts
+        run: |
+          {
+            echo '## SHA256 checksums'
+            echo
+            echo '```'
+            cat *.sha256sum
+            echo '```'
+          } >> "${RUNNER_TEMP}/release_notes.md"
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release_notes_${{ inputs.version }}
+          path: "${RUNNER_TEMP}/release_notes.md"
+
+      - name: Remove current release and tag
+        if: ${{ github.event_name != 'pull_request' && inputs.overwrite_release }}
+        shell: bash
+        run: |
+          gh release delete ${{ inputs.version }} --yes || true
+          git push origin :${{ inputs.version }} || true
+
+      - name: Publish release
+        if: ${{ github.event_name != 'pull_request' }}
+        shell: bash
+        run: |
+          gh release create ${{ inputs.version }} \
+            ${{ inputs.overwrite_release && '--prerelease' || '' }} \
+            --title "${{ inputs.title }}" \
+            --target $GITHUB_SHA \
+            ${{ inputs.draft && '--draft' || '' }} \
+            --notes-file "${RUNNER_TEMP}/release_notes.md" \
+            ./release_artifacts/clio_server*

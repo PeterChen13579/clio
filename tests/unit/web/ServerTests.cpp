@@ -23,11 +23,11 @@
 #include "util/TestHttpClient.hpp"
 #include "util/TestWebSocketClient.hpp"
 #include "util/TmpFile.hpp"
-#include "util/newconfig/Array.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
-#include "util/newconfig/ConfigFileJson.hpp"
-#include "util/newconfig/ConfigValue.hpp"
-#include "util/newconfig/Types.hpp"
+#include "util/config/Array.hpp"
+#include "util/config/ConfigDefinition.hpp"
+#include "util/config/ConfigFileJson.hpp"
+#include "util/config/ConfigValue.hpp"
+#include "util/config/Types.hpp"
 #include "util/prometheus/Label.hpp"
 #include "util/prometheus/Prometheus.hpp"
 #include "web/AdminVerificationStrategy.hpp"
@@ -35,6 +35,7 @@
 #include "web/dosguard/DOSGuard.hpp"
 #include "web/dosguard/DOSGuardInterface.hpp"
 #include "web/dosguard/IntervalSweepHandler.hpp"
+#include "web/dosguard/Weights.hpp"
 #include "web/dosguard/WhitelistHandler.hpp"
 #include "web/interface/ConnectionBase.hpp"
 
@@ -137,16 +138,16 @@ getParseServerConfig(boost::json::value val)
 struct WebServerTest : NoLoggerFixture {
     ~WebServerTest() override
     {
-        work.reset();
+        work_.reset();
         ctx.stop();
-        if (runner->joinable())
-            runner->join();
+        if (runner_->joinable())
+            runner_->join();
     }
 
     WebServerTest()
     {
-        work.emplace(ctx);  // make sure ctx does not stop on its own
-        runner.emplace([this] { ctx.run(); });
+        work_.emplace(ctx);  // make sure ctx does not stop on its own
+        runner_.emplace([this] { ctx.run(); });
     }
 
     boost::json::value
@@ -162,12 +163,13 @@ struct WebServerTest : NoLoggerFixture {
     std::string const port = std::to_string(tests::util::generateFreePort());
     ClioConfigDefinition cfg{getParseServerConfig(generateJSONWithDynamicPort(port))};
     dosguard::WhitelistHandler whitelistHandler{cfg};
-    dosguard::DOSGuard dosGuard{cfg, whitelistHandler};
+    dosguard::Weights dosguardWeights{1, {}};
+    dosguard::DOSGuard dosGuard{cfg, whitelistHandler, dosguardWeights};
     dosguard::IntervalSweepHandler sweepHandler{cfg, ctxSync, dosGuard};
 
     ClioConfigDefinition cfgOverload{getParseServerConfig(generateJSONDataOverload(port))};
     dosguard::WhitelistHandler whitelistHandlerOverload{cfgOverload};
-    dosguard::DOSGuard dosGuardOverload{cfgOverload, whitelistHandlerOverload};
+    dosguard::DOSGuard dosGuardOverload{cfgOverload, whitelistHandlerOverload, dosguardWeights};
     dosguard::IntervalSweepHandler sweepHandlerOverload{cfgOverload, ctxSync, dosGuardOverload};
     // this ctx is for http server
     boost::asio::io_context ctx;
@@ -176,8 +178,8 @@ struct WebServerTest : NoLoggerFixture {
     TmpFile sslKeyFile{tests::sslKeyFile()};
 
 private:
-    std::optional<boost::asio::io_service::work> work;
-    std::optional<std::thread> runner;
+    std::optional<boost::asio::io_service::work> work_;
+    std::optional<std::thread> runner_;
 };
 
 class EchoExecutor {
@@ -224,7 +226,7 @@ makeServerSync(
     std::condition_variable cv;
     bool ready = false;
     boost::asio::dispatch(ioc.get_executor(), [&]() mutable {
-        server = web::make_HttpServer(config, ioc, dosGuard, handler);
+        server = web::makeHttpServer(config, ioc, dosGuard, handler);
         {
             std::lock_guard const lk(m);
             ready = true;
@@ -244,8 +246,8 @@ TEST_F(WebServerTest, Http)
 {
     auto const e = std::make_shared<EchoExecutor>();
     auto const server = makeServerSync(cfg, ctx, dosGuard, e);
-    auto const [status, res] = HttpSyncClient::post("localhost", port, R"({"Hello":1})");
-    EXPECT_EQ(res, R"({"Hello":1})");
+    auto const [status, res] = HttpSyncClient::post("localhost", port, R"JSON({"Hello":1})JSON");
+    EXPECT_EQ(res, R"JSON({"Hello":1})JSON");
     EXPECT_EQ(status, boost::beast::http::status::ok);
 }
 
@@ -255,8 +257,8 @@ TEST_F(WebServerTest, Ws)
     auto const server = makeServerSync(cfg, ctx, dosGuard, e);
     WebSocketSyncClient wsClient;
     wsClient.connect("localhost", port);
-    auto const res = wsClient.syncPost(R"({"Hello":1})");
-    EXPECT_EQ(res, R"({"Hello":1})");
+    auto const res = wsClient.syncPost(R"JSON({"Hello":1})JSON");
+    EXPECT_EQ(res, R"JSON({"Hello":1})JSON");
     wsClient.disconnect();
 }
 
@@ -264,10 +266,10 @@ TEST_F(WebServerTest, HttpInternalError)
 {
     auto const e = std::make_shared<ExceptionExecutor>();
     auto const server = makeServerSync(cfg, ctx, dosGuard, e);
-    auto const [status, res] = HttpSyncClient::post("localhost", port, R"({})");
+    auto const [status, res] = HttpSyncClient::post("localhost", port, R"JSON({})JSON");
     EXPECT_EQ(
         res,
-        R"({"error":"internal","error_code":73,"error_message":"Internal error.","status":"error","type":"response"})"
+        R"JSON({"error":"internal","error_code":73,"error_message":"Internal error.","status":"error","type":"response"})JSON"
     );
     EXPECT_EQ(status, boost::beast::http::status::internal_server_error);
 }
@@ -278,11 +280,11 @@ TEST_F(WebServerTest, WsInternalError)
     auto const server = makeServerSync(cfg, ctx, dosGuard, e);
     WebSocketSyncClient wsClient;
     wsClient.connect("localhost", port);
-    auto const res = wsClient.syncPost(R"({"id":"id1"})");
+    auto const res = wsClient.syncPost(R"JSON({"id":"id1"})JSON");
     wsClient.disconnect();
     EXPECT_EQ(
         res,
-        R"({"error":"internal","error_code":73,"error_message":"Internal error.","status":"error","type":"response","id":"id1","request":{"id":"id1"}})"
+        R"JSON({"error":"internal","error_code":73,"error_message":"Internal error.","status":"error","type":"response","id":"id1","request":{"id":"id1"}})JSON"
     );
 }
 
@@ -296,7 +298,7 @@ TEST_F(WebServerTest, WsInternalErrorNotJson)
     wsClient.disconnect();
     EXPECT_EQ(
         res,
-        R"({"error":"internal","error_code":73,"error_message":"Internal error.","status":"error","type":"response","request":"not json"})"
+        R"JSON({"error":"internal","error_code":73,"error_message":"Internal error.","status":"error","type":"response","request":"not json"})JSON"
     );
 }
 
@@ -328,8 +330,8 @@ TEST_F(WebServerTest, Https)
     auto const e = std::make_shared<EchoExecutor>();
     cfg = getParseServerConfig(addSslConfig(generateJSONWithDynamicPort(port)));
     auto const server = makeServerSync(cfg, ctx, dosGuard, e);
-    auto const res = HttpsSyncClient::syncPost("localhost", port, R"({"Hello":1})");
-    EXPECT_EQ(res, R"({"Hello":1})");
+    auto const res = HttpsSyncClient::syncPost("localhost", port, R"JSON({"Hello":1})JSON");
+    EXPECT_EQ(res, R"JSON({"Hello":1})JSON");
 }
 
 TEST_F(WebServerTest, Wss)
@@ -339,44 +341,9 @@ TEST_F(WebServerTest, Wss)
     auto server = makeServerSync(cfg, ctx, dosGuard, e);
     WebServerSslSyncClient wsClient;
     wsClient.connect("localhost", port);
-    auto const res = wsClient.syncPost(R"({"Hello":1})");
-    EXPECT_EQ(res, R"({"Hello":1})");
+    auto const res = wsClient.syncPost(R"JSON({"Hello":1})JSON");
+    EXPECT_EQ(res, R"JSON({"Hello":1})JSON");
     wsClient.disconnect();
-}
-
-TEST_F(WebServerTest, HttpRequestOverload)
-{
-    auto const e = std::make_shared<EchoExecutor>();
-    auto const server = makeServerSync(cfg, ctx, dosGuardOverload, e);
-    auto [status, res] = HttpSyncClient::post("localhost", port, R"({})");
-    EXPECT_EQ(res, "{}");
-    EXPECT_EQ(status, boost::beast::http::status::ok);
-
-    std::tie(status, res) = HttpSyncClient::post("localhost", port, R"({})");
-    EXPECT_EQ(
-        res,
-        R"({"error":"slowDown","error_code":10,"error_message":"You are placing too much load on the server.","status":"error","type":"response"})"
-    );
-    EXPECT_EQ(status, boost::beast::http::status::service_unavailable);
-}
-
-TEST_F(WebServerTest, WsRequestOverload)
-{
-    auto e = std::make_shared<EchoExecutor>();
-    auto const server = makeServerSync(cfg, ctx, dosGuardOverload, e);
-    WebSocketSyncClient wsClient;
-    wsClient.connect("localhost", port);
-    auto res = wsClient.syncPost(R"({})");
-    wsClient.disconnect();
-    EXPECT_EQ(res, "{}");
-    WebSocketSyncClient wsClient2;
-    wsClient2.connect("localhost", port);
-    res = wsClient2.syncPost(R"({})");
-    wsClient2.disconnect();
-    EXPECT_EQ(
-        res,
-        R"({"error":"slowDown","error_code":10,"error_message":"You are placing too much load on the server.","status":"error","type":"response","request":{}})"
-    );
 }
 
 TEST_F(WebServerTest, HttpPayloadOverload)
@@ -384,10 +351,11 @@ TEST_F(WebServerTest, HttpPayloadOverload)
     std::string const s100(100, 'a');
     auto const e = std::make_shared<EchoExecutor>();
     auto server = makeServerSync(cfg, ctx, dosGuardOverload, e);
-    auto const [status, res] = HttpSyncClient::post("localhost", port, fmt::format(R"({{"payload":"{}"}})", s100));
+    auto const [status, res] =
+        HttpSyncClient::post("localhost", port, fmt::format(R"JSON({{"payload":"{}"}})JSON", s100));
     EXPECT_EQ(
         res,
-        R"({"payload":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","warning":"load","warnings":[{"id":2003,"message":"You are about to be rate limited"}]})"
+        R"JSON({"payload":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","warning":"load","warnings":[{"id":2003,"message":"You are about to be rate limited"}]})JSON"
     );
     EXPECT_EQ(status, boost::beast::http::status::ok);
 }
@@ -399,11 +367,11 @@ TEST_F(WebServerTest, WsPayloadOverload)
     auto server = makeServerSync(cfg, ctx, dosGuardOverload, e);
     WebSocketSyncClient wsClient;
     wsClient.connect("localhost", port);
-    auto const res = wsClient.syncPost(fmt::format(R"({{"payload":"{}"}})", s100));
+    auto const res = wsClient.syncPost(fmt::format(R"JSON({{"payload":"{}"}})JSON", s100));
     wsClient.disconnect();
     EXPECT_EQ(
         res,
-        R"({"payload":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","warning":"load","warnings":[{"id":2003,"message":"You are about to be rate limited"}]})"
+        R"JSON({"payload":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","warning":"load","warnings":[{"id":2003,"message":"You are about to be rate limited"}]})JSON"
     );
 }
 
@@ -449,8 +417,10 @@ TEST_F(WebServerTest, GetOtherThanHealthCheck)
     EXPECT_EQ(status, boost::beast::http::status::bad_request);
 }
 
-static std::string
-JSONServerConfigWithAdminPassword(uint32_t const port)
+namespace {
+
+std::string
+jsonServerConfigWithAdminPassword(uint32_t const port)
 {
     return fmt::format(
         R"JSON({{
@@ -464,8 +434,8 @@ JSONServerConfigWithAdminPassword(uint32_t const port)
     );
 }
 
-static std::string
-JSONServerConfigWithLocalAdmin(uint32_t const port)
+std::string
+jsonServerConfigWithLocalAdmin(uint32_t const port)
 {
     return fmt::format(
         R"JSON({{
@@ -479,8 +449,8 @@ JSONServerConfigWithLocalAdmin(uint32_t const port)
     );
 }
 
-static std::string
-JSONServerConfigWithBothAdminPasswordAndLocalAdminFalse(uint32_t const port)
+std::string
+jsonServerConfigWithBothAdminPasswordAndLocalAdminFalse(uint32_t const port)
 {
     return fmt::format(
         R"JSON({{
@@ -495,8 +465,8 @@ JSONServerConfigWithBothAdminPasswordAndLocalAdminFalse(uint32_t const port)
     );
 }
 
-static std::string
-JSONServerConfigWithNoSpecifiedAdmin(uint32_t const port)
+std::string
+jsonServerConfigWithNoSpecifiedAdmin(uint32_t const port)
 {
     return fmt::format(
         R"JSON({{
@@ -510,7 +480,9 @@ JSONServerConfigWithNoSpecifiedAdmin(uint32_t const port)
 }
 
 // get this value from online sha256 generator
-static auto constexpr SecretSha256 = "2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b";
+constexpr auto kSECRET_SHA256 = "2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b";
+
+}  // namespace
 
 class AdminCheckExecutor {
 public:
@@ -591,61 +563,61 @@ INSTANTIATE_TEST_CASE_P(
     WebServerAdminTest,
     ::testing::Values(
         WebServerAdminTestParams{
-            .config = JSONServerConfigWithAdminPassword(tests::util::generateFreePort()),
+            .config = jsonServerConfigWithAdminPassword(tests::util::generateFreePort()),
             .headers = {},
             .expectedResponse = "user"
         },
         WebServerAdminTestParams{
-            .config = JSONServerConfigWithAdminPassword(tests::util::generateFreePort()),
+            .config = jsonServerConfigWithAdminPassword(tests::util::generateFreePort()),
             .headers = {WebHeader(http::field::authorization, "")},
             .expectedResponse = "user"
         },
         WebServerAdminTestParams{
-            .config = JSONServerConfigWithAdminPassword(tests::util::generateFreePort()),
+            .config = jsonServerConfigWithAdminPassword(tests::util::generateFreePort()),
             .headers = {WebHeader(http::field::authorization, "s")},
             .expectedResponse = "user"
         },
         WebServerAdminTestParams{
-            .config = JSONServerConfigWithAdminPassword(tests::util::generateFreePort()),
-            .headers = {WebHeader(http::field::authorization, SecretSha256)},
+            .config = jsonServerConfigWithAdminPassword(tests::util::generateFreePort()),
+            .headers = {WebHeader(http::field::authorization, kSECRET_SHA256)},
             .expectedResponse = "user"
         },
         WebServerAdminTestParams{
-            .config = JSONServerConfigWithAdminPassword(tests::util::generateFreePort()),
+            .config = jsonServerConfigWithAdminPassword(tests::util::generateFreePort()),
             .headers = {WebHeader(
                 http::field::authorization,
-                fmt::format("{}{}", PasswordAdminVerificationStrategy::passwordPrefix, SecretSha256)
+                fmt::format("{}{}", PasswordAdminVerificationStrategy::kPASSWORD_PREFIX, kSECRET_SHA256)
             )},
             .expectedResponse = "admin"
         },
         WebServerAdminTestParams{
-            .config = JSONServerConfigWithBothAdminPasswordAndLocalAdminFalse(tests::util::generateFreePort()),
-            .headers = {WebHeader(http::field::authorization, SecretSha256)},
+            .config = jsonServerConfigWithBothAdminPasswordAndLocalAdminFalse(tests::util::generateFreePort()),
+            .headers = {WebHeader(http::field::authorization, kSECRET_SHA256)},
             .expectedResponse = "user"
         },
         WebServerAdminTestParams{
-            .config = JSONServerConfigWithBothAdminPasswordAndLocalAdminFalse(tests::util::generateFreePort()),
+            .config = jsonServerConfigWithBothAdminPasswordAndLocalAdminFalse(tests::util::generateFreePort()),
             .headers = {WebHeader(
                 http::field::authorization,
-                fmt::format("{}{}", PasswordAdminVerificationStrategy::passwordPrefix, SecretSha256)
+                fmt::format("{}{}", PasswordAdminVerificationStrategy::kPASSWORD_PREFIX, kSECRET_SHA256)
             )},
             .expectedResponse = "admin"
         },
         WebServerAdminTestParams{
-            .config = JSONServerConfigWithAdminPassword(tests::util::generateFreePort()),
+            .config = jsonServerConfigWithAdminPassword(tests::util::generateFreePort()),
             .headers = {WebHeader(
                 http::field::authentication_info,
-                fmt::format("{}{}", PasswordAdminVerificationStrategy::passwordPrefix, SecretSha256)
+                fmt::format("{}{}", PasswordAdminVerificationStrategy::kPASSWORD_PREFIX, kSECRET_SHA256)
             )},
             .expectedResponse = "user"
         },
         WebServerAdminTestParams{
-            .config = JSONServerConfigWithLocalAdmin(tests::util::generateFreePort()),
+            .config = jsonServerConfigWithLocalAdmin(tests::util::generateFreePort()),
             .headers = {},
             .expectedResponse = "admin"
         },
         WebServerAdminTestParams{
-            .config = JSONServerConfigWithNoSpecifiedAdmin(tests::util::generateFreePort()),
+            .config = jsonServerConfigWithNoSpecifiedAdmin(tests::util::generateFreePort()),
             .headers = {},
             .expectedResponse = "admin"
         }
@@ -656,7 +628,7 @@ INSTANTIATE_TEST_CASE_P(
 TEST_F(WebServerTest, AdminErrorCfgTestBothAdminPasswordAndLocalAdminSet)
 {
     uint32_t webServerPort = tests::util::generateFreePort();
-    std::string const JSONServerConfigWithBothAdminPasswordAndLocalAdmin = fmt::format(
+    std::string const jsonServerConfigWithBothAdminPasswordAndLocalAdmin = fmt::format(
         R"JSON({{
         "server":{{
                 "ip": "0.0.0.0",
@@ -670,15 +642,15 @@ TEST_F(WebServerTest, AdminErrorCfgTestBothAdminPasswordAndLocalAdminSet)
 
     auto const e = std::make_shared<AdminCheckExecutor>();
     ClioConfigDefinition const serverConfig{
-        getParseAdminServerConfig(boost::json::parse(JSONServerConfigWithBothAdminPasswordAndLocalAdmin))
+        getParseAdminServerConfig(boost::json::parse(jsonServerConfigWithBothAdminPasswordAndLocalAdmin))
     };
-    EXPECT_THROW(web::make_HttpServer(serverConfig, ctx, dosGuardOverload, e), std::logic_error);
+    EXPECT_THROW(web::makeHttpServer(serverConfig, ctx, dosGuardOverload, e), std::logic_error);
 }
 
 TEST_F(WebServerTest, AdminErrorCfgTestBothAdminPasswordAndLocalAdminFalse)
 {
     uint32_t webServerPort = tests::util::generateFreePort();
-    std::string const JSONServerConfigWithNoAdminPasswordAndLocalAdminFalse = fmt::format(
+    std::string const jsonServerConfigWithNoAdminPasswordAndLocalAdminFalse = fmt::format(
         R"JSON({{
         "server": {{
             "ip": "0.0.0.0",
@@ -691,9 +663,9 @@ TEST_F(WebServerTest, AdminErrorCfgTestBothAdminPasswordAndLocalAdminFalse)
 
     auto const e = std::make_shared<AdminCheckExecutor>();
     ClioConfigDefinition const serverConfig{
-        getParseAdminServerConfig(boost::json::parse(JSONServerConfigWithNoAdminPasswordAndLocalAdminFalse))
+        getParseAdminServerConfig(boost::json::parse(jsonServerConfigWithNoAdminPasswordAndLocalAdminFalse))
     };
-    EXPECT_THROW(web::make_HttpServer(serverConfig, ctx, dosGuardOverload, e), std::logic_error);
+    EXPECT_THROW(web::makeHttpServer(serverConfig, ctx, dosGuardOverload, e), std::logic_error);
 }
 
 struct WebServerPrometheusTest : util::prometheus::WithPrometheus, WebServerTest {};
@@ -703,7 +675,7 @@ TEST_F(WebServerPrometheusTest, rejectedWithoutAdminPassword)
     auto const e = std::make_shared<EchoExecutor>();
     uint32_t const webServerPort = tests::util::generateFreePort();
     ClioConfigDefinition const serverConfig{
-        getParseAdminServerConfig(boost::json::parse(JSONServerConfigWithAdminPassword(webServerPort)))
+        getParseAdminServerConfig(boost::json::parse(jsonServerConfigWithAdminPassword(webServerPort)))
     };
     auto server = makeServerSync(serverConfig, ctx, dosGuard, e);
     auto const [status, res] = HttpSyncClient::get("localhost", std::to_string(webServerPort), "", "/metrics");
@@ -715,7 +687,7 @@ TEST_F(WebServerPrometheusTest, rejectedWithoutAdminPassword)
 TEST_F(WebServerPrometheusTest, rejectedIfPrometheusIsDisabled)
 {
     uint32_t webServerPort = tests::util::generateFreePort();
-    std::string const JSONServerConfigWithDisabledPrometheus = fmt::format(
+    std::string const jsonServerConfigWithDisabledPrometheus = fmt::format(
         R"JSON({{
         "server":{{
                 "ip": "0.0.0.0",
@@ -730,7 +702,7 @@ TEST_F(WebServerPrometheusTest, rejectedIfPrometheusIsDisabled)
 
     auto const e = std::make_shared<EchoExecutor>();
     ClioConfigDefinition const serverConfig{
-        getParseAdminServerConfig(boost::json::parse(JSONServerConfigWithDisabledPrometheus))
+        getParseAdminServerConfig(boost::json::parse(jsonServerConfigWithDisabledPrometheus))
     };
     PrometheusService::init(serverConfig);
     auto server = makeServerSync(serverConfig, ctx, dosGuard, e);
@@ -741,7 +713,7 @@ TEST_F(WebServerPrometheusTest, rejectedIfPrometheusIsDisabled)
         "/metrics",
         {WebHeader(
             http::field::authorization,
-            fmt::format("{}{}", PasswordAdminVerificationStrategy::passwordPrefix, SecretSha256)
+            fmt::format("{}{}", PasswordAdminVerificationStrategy::kPASSWORD_PREFIX, kSECRET_SHA256)
         )}
     );
     EXPECT_EQ(res, "Prometheus is disabled in clio config");
@@ -755,7 +727,7 @@ TEST_F(WebServerPrometheusTest, validResponse)
     ++testCounter;
     auto const e = std::make_shared<EchoExecutor>();
     ClioConfigDefinition const serverConfig{
-        getParseAdminServerConfig(boost::json::parse(JSONServerConfigWithAdminPassword(webServerPort)))
+        getParseAdminServerConfig(boost::json::parse(jsonServerConfigWithAdminPassword(webServerPort)))
     };
     auto server = makeServerSync(serverConfig, ctx, dosGuard, e);
     auto const [status, res] = HttpSyncClient::get(
@@ -765,7 +737,7 @@ TEST_F(WebServerPrometheusTest, validResponse)
         "/metrics",
         {WebHeader(
             http::field::authorization,
-            fmt::format("{}{}", PasswordAdminVerificationStrategy::passwordPrefix, SecretSha256)
+            fmt::format("{}{}", PasswordAdminVerificationStrategy::kPASSWORD_PREFIX, kSECRET_SHA256)
         )}
     );
     EXPECT_EQ(res, "# TYPE test_counter counter\ntest_counter 1\n\n");

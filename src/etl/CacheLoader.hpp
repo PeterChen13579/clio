@@ -20,11 +20,13 @@
 #pragma once
 
 #include "data/BackendInterface.hpp"
+#include "data/LedgerCacheInterface.hpp"
 #include "etl/CacheLoaderSettings.hpp"
 #include "etl/impl/CacheLoader.hpp"
 #include "etl/impl/CursorFromAccountProvider.hpp"
 #include "etl/impl/CursorFromDiffProvider.hpp"
 #include "etl/impl/CursorFromFixDiffNumProvider.hpp"
+#include "etlng/CacheLoaderInterface.hpp"
 #include "util/Assert.hpp"
 #include "util/async/context/BasicExecutionContext.hpp"
 #include "util/log/Logger.hpp"
@@ -32,6 +34,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <utility>
 
 namespace etl {
 
@@ -44,13 +47,13 @@ namespace etl {
  * @tparam CursorProviderType The type of the cursor provider to use
  * @tparam ExecutionContextType The type of the execution context to use
  */
-template <typename CacheType, typename ExecutionContextType = util::async::CoroExecutionContext>
-class CacheLoader {
-    using CacheLoaderType = impl::CacheLoaderImpl<CacheType>;
+template <typename ExecutionContextType = util::async::CoroExecutionContext>
+class CacheLoader : public etlng::CacheLoaderInterface {
+    using CacheLoaderType = impl::CacheLoaderImpl<data::LedgerCacheInterface>;
 
     util::Logger log_{"ETL"};
     std::shared_ptr<BackendInterface> backend_;
-    std::reference_wrapper<CacheType> cache_;
+    std::reference_wrapper<data::LedgerCacheInterface> cache_;
 
     CacheLoaderSettings settings_;
     ExecutionContextType ctx_;
@@ -66,10 +69,13 @@ public:
      */
     CacheLoader(
         util::config::ClioConfigDefinition const& config,
-        std::shared_ptr<BackendInterface> const& backend,
-        CacheType& cache
+        std::shared_ptr<BackendInterface> backend,
+        data::LedgerCacheInterface& cache
     )
-        : backend_{backend}, cache_{cache}, settings_{make_CacheLoaderSettings(config)}, ctx_{settings_.numThreads}
+        : backend_{std::move(backend)}
+        , cache_{cache}
+        , settings_{makeCacheLoaderSettings(config)}
+        , ctx_{settings_.numThreads}
     {
     }
 
@@ -82,7 +88,7 @@ public:
      * @param seq The sequence number to load cache for
      */
     void
-    load(uint32_t const seq)
+    load(uint32_t const seq) override
     {
         ASSERT(not cache_.get().isFull(), "Cache must not be full. seq = {}", seq);
 
@@ -128,18 +134,20 @@ public:
      * @brief Requests the loader to stop asap
      */
     void
-    stop() noexcept
+    stop() noexcept override
     {
-        loader_->stop();
+        if (loader_ != nullptr)
+            loader_->stop();
     }
 
     /**
      * @brief Waits for the loader to finish background work
      */
     void
-    wait() noexcept
+    wait() noexcept override
     {
-        loader_->wait();
+        if (loader_ != nullptr)
+            loader_->wait();
     }
 };
 

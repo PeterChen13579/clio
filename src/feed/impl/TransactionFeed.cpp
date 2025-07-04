@@ -19,11 +19,13 @@
 
 #include "feed/impl/TransactionFeed.hpp"
 
+#include "data/AmendmentCenterInterface.hpp"
 #include "data/BackendInterface.hpp"
 #include "data/Types.hpp"
 #include "feed/Types.hpp"
 #include "rpc/JS.hpp"
 #include "rpc/RPCHelpers.hpp"
+#include "util/Assert.hpp"
 #include "util/log/Logger.hpp"
 
 #include <boost/asio/spawn.hpp>
@@ -174,7 +176,9 @@ void
 TransactionFeed::pub(
     data::TransactionAndMetadata const& txMeta,
     ripple::LedgerHeader const& lgrInfo,
-    std::shared_ptr<data::BackendInterface const> const& backend
+    std::shared_ptr<data::BackendInterface const> const& backend,
+    std::shared_ptr<data::AmendmentCenterInterface const> const& amendmentCenter,
+    uint32_t const networkID
 )
 {
     auto [tx, meta] = rpc::deserializeTxPlusMeta(txMeta, lgrInfo.seq);
@@ -187,7 +191,7 @@ TransactionFeed::pub(
         if (account != amount.issue().account) {
             auto fetchFundsSynchronous = [&]() {
                 data::synchronous([&](boost::asio::yield_context yield) {
-                    ownerFunds = rpc::accountFunds(*backend, lgrInfo.seq, amount, account, yield);
+                    ownerFunds = rpc::accountFunds(*backend, *amendmentCenter, lgrInfo.seq, amount, account, yield);
                 });
             };
             data::retryOnTimeout(fetchFundsSynchronous);
@@ -202,6 +206,15 @@ TransactionFeed::pub(
         rpc::insertDeliveredAmount(pubObj[JS(meta)].as_object(), tx, meta, txMeta.date);
         rpc::insertDeliverMaxAlias(pubObj[txKey].as_object(), version);
         rpc::insertMPTIssuanceID(pubObj[JS(meta)].as_object(), tx, meta);
+
+        auto const& metaObj = pubObj[JS(meta)];
+        ASSERT(metaObj.is_object(), "meta must be an obj in rippled and clio");
+        if (metaObj.as_object().contains("TransactionIndex") && metaObj.as_object().at("TransactionIndex").is_int64()) {
+            if (auto const& ctid =
+                    rpc::encodeCTID(lgrInfo.seq, metaObj.as_object().at("TransactionIndex").as_int64(), networkID);
+                ctid)
+                pubObj[JS(ctid)] = ctid.value();
+        }
 
         pubObj[JS(type)] = "transaction";
         pubObj[JS(validated)] = true;
@@ -264,7 +277,8 @@ TransactionFeed::pub(
                     // determine the OrderBook
                     ripple::Book const book{
                         data->getFieldAmount(ripple::sfTakerGets).issue(),
-                        data->getFieldAmount(ripple::sfTakerPays).issue()
+                        data->getFieldAmount(ripple::sfTakerPays).issue(),
+                        (*data)[~ripple::sfDomainID]
                     };
                     if (affectedBooks.find(book) == affectedBooks.end()) {
                         affectedBooks.insert(book);

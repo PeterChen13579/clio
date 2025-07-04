@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of clio: https://github.com/XRPLF/clio
-    Copyright (c) 2022-2024, the clio developers.
+    Copyright (c) 2024, the clio developers.
 
     Permission to use, copy, modify, and distribute this software for any
     purpose with or without fee is hereby granted, provided that the above
@@ -20,9 +20,8 @@
 #pragma once
 
 #include "data/CassandraBackend.hpp"
+#include "data/LedgerCacheInterface.hpp"
 #include "data/cassandra/SettingsProvider.hpp"
-#include "data/cassandra/Types.hpp"
-#include "migration/MigratiorStatus.hpp"
 #include "migration/cassandra/impl/CassandraMigrationSchema.hpp"
 #include "migration/cassandra/impl/Spec.hpp"
 #include "util/log/Logger.hpp"
@@ -49,9 +48,13 @@ public:
      * @brief Construct a new Cassandra Migration Backend object. The backend is not readonly.
      *
      * @param settingsProvider The settings provider
+     * @param cache The ledger cache to use
      */
-    explicit CassandraMigrationBackend(data::cassandra::SettingsProvider settingsProvider)
-        : data::cassandra::CassandraBackend{auto{settingsProvider}, false /* not readonly */}
+    explicit CassandraMigrationBackend(
+        data::cassandra::SettingsProvider settingsProvider,
+        data::LedgerCacheInterface& cache
+    )
+        : data::cassandra::CassandraBackend{auto{settingsProvider}, cache, false /* not readonly */}
         , settingsProvider_(std::move(settingsProvider))
         , migrationSchema_{settingsProvider_}
     {
@@ -76,23 +79,23 @@ public:
     )
     {
         LOG(log_.debug()) << "Travsering token range: " << start << " - " << end
-                          << " ; table: " << TableDesc::TABLE_NAME;
+                          << " ; table: " << TableDesc::kTABLE_NAME;
         // for each table we only have one prepared statement
-        static auto statementPrepared =
-            migrationSchema_.getPreparedFullScanStatement(handle_, TableDesc::TABLE_NAME, TableDesc::PARTITION_KEY);
+        static auto kSTATEMENT_PREPARED =
+            migrationSchema_.getPreparedFullScanStatement(handle_, TableDesc::kTABLE_NAME, TableDesc::kPARTITION_KEY);
 
-        auto const statement = statementPrepared.bind(start, end);
+        auto const statement = kSTATEMENT_PREPARED.bind(start, end);
 
         auto const res = this->executor_.read(yield, statement);
         if (not res) {
-            LOG(log_.error()) << "Could not fetch data from table: " << TableDesc::TABLE_NAME << " range: " << start
+            LOG(log_.error()) << "Could not fetch data from table: " << TableDesc::kTABLE_NAME << " range: " << start
                               << " - " << end << ";" << res.error();
             return;
         }
 
         auto const& results = res.value();
         if (not results.hasRows()) {
-            LOG(log_.debug()) << "No rows returned  - table: " << TableDesc::TABLE_NAME << " range: " << start << " - "
+            LOG(log_.debug()) << "No rows returned  - table: " << TableDesc::kTABLE_NAME << " range: " << start << " - "
                               << end;
             return;
         }

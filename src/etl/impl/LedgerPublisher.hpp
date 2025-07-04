@@ -21,8 +21,10 @@
 
 #include "data/BackendInterface.hpp"
 #include "data/DBHelpers.hpp"
+#include "data/LedgerCacheInterface.hpp"
 #include "data/Types.hpp"
 #include "etl/SystemState.hpp"
+#include "etlng/LedgerPublisherInterface.hpp"
 #include "feed/SubscriptionManagerInterface.hpp"
 #include "util/Assert.hpp"
 #include "util/log/Logger.hpp"
@@ -30,6 +32,7 @@
 #include "util/prometheus/Prometheus.hpp"
 
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/strand.hpp>
 #include <xrpl/basics/chrono.h>
 #include <xrpl/protocol/Fees.h>
@@ -38,6 +41,7 @@
 #include <xrpl/protocol/STObject.h>
 #include <xrpl/protocol/Serializer.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -64,14 +68,13 @@ namespace etl::impl {
  * includes reading all of the transactions from the database) is done from the application wide asio io_service, and a
  * strand is used to ensure ledgers are published in order.
  */
-template <typename CacheType>
-class LedgerPublisher {
+class LedgerPublisher : public etlng::LedgerPublisherInterface {
     util::Logger log_{"ETL"};
 
     boost::asio::strand<boost::asio::io_context::executor_type> publishStrand_;
 
     std::shared_ptr<BackendInterface> backend_;
-    std::reference_wrapper<CacheType> cache_;
+    std::reference_wrapper<data::LedgerCacheInterface> cache_;
     std::shared_ptr<feed::SubscriptionManagerInterface> subscriptions_;
     std::reference_wrapper<SystemState const> state_;  // shared state for ETL
 
@@ -94,7 +97,7 @@ public:
     LedgerPublisher(
         boost::asio::io_context& ioc,
         std::shared_ptr<BackendInterface> backend,
-        CacheType& cache,
+        data::LedgerCacheInterface& cache,
         std::shared_ptr<feed::SubscriptionManagerInterface> subscriptions,
         SystemState const& state
     )
@@ -120,7 +123,7 @@ public:
         uint32_t ledgerSequence,
         std::optional<uint32_t> maxAttempts,
         std::chrono::steady_clock::duration attemptsDelay = std::chrono::seconds{1}
-    )
+    ) override
     {
         LOG(log_.info()) << "Attempting to publish ledger = " << ledgerSequence;
         size_t numAttempts = 0;
@@ -184,8 +187,8 @@ public:
 
             // if the ledger closed over MAX_LEDGER_AGE_SECONDS ago, assume we are still catching up and don't publish
             // TODO: this probably should be a strategy
-            static constexpr std::uint32_t MAX_LEDGER_AGE_SECONDS = 600;
-            if (age < MAX_LEDGER_AGE_SECONDS) {
+            static constexpr std::uint32_t kMAX_LEDGER_AGE_SECONDS = 600;
+            if (age < kMAX_LEDGER_AGE_SECONDS) {
                 std::optional<ripple::Fees> fees = data::synchronousAndRetryOnTimeout([&](auto yield) {
                     return backend_->fetchFees(lgrInfo.seq, yield);
                 });
@@ -205,7 +208,7 @@ public:
                 subscriptions_->pubLedger(lgrInfo, *fees, range, transactions.size());
 
                 // order with transaction index
-                std::sort(transactions.begin(), transactions.end(), [](auto const& t1, auto const& t2) {
+                std::ranges::sort(transactions, [](auto const& t1, auto const& t2) {
                     ripple::SerialIter iter1{t1.metadata.data(), t1.metadata.size()};
                     ripple::STObject const object1(iter1, ripple::sfMetadata);
                     ripple::SerialIter iter2{t2.metadata.data(), t2.metadata.size()};
@@ -234,7 +237,7 @@ public:
      * @brief Get time passed since last publish, in seconds
      */
     std::uint32_t
-    lastPublishAgeSeconds() const
+    lastPublishAgeSeconds() const override
     {
         return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - getLastPublish())
             .count();
@@ -244,7 +247,7 @@ public:
      * @brief Get last publish time as a time point
      */
     std::chrono::time_point<std::chrono::system_clock>
-    getLastPublish() const
+    getLastPublish() const override
     {
         return std::chrono::time_point<std::chrono::system_clock>{std::chrono::seconds{lastPublishSeconds_.get().value()
         }};
@@ -254,19 +257,19 @@ public:
      * @brief Get time passed since last ledger close, in seconds
      */
     std::uint32_t
-    lastCloseAgeSeconds() const
+    lastCloseAgeSeconds() const override
     {
         std::shared_lock const lck(closeTimeMtx_);
         auto now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch())
                        .count();
         auto closeTime = lastCloseTime_.time_since_epoch().count();
-        if (now < (rippleEpochStart + closeTime))
+        if (now < (kRIPPLE_EPOCH_START + closeTime))
             return 0;
-        return now - (rippleEpochStart + closeTime);
+        return now - (kRIPPLE_EPOCH_START + closeTime);
     }
 
     /**
-     * @brief Get the sequence of the last schueduled ledger to publish, Be aware that the ledger may not have been
+     * @brief Get the sequence of the last scheduled ledger to publish, Be aware that the ledger may not have been
      * published to network
      */
     std::optional<uint32_t>

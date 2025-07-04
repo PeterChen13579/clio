@@ -35,7 +35,7 @@ public:
     /**
      * @brief Default configuration path.
      */
-    static constexpr char defaultConfigPath[] = "/etc/opt/clio/config.json";
+    static constexpr char kDEFAULT_CONFIG_PATH[] = "/etc/opt/clio/config.json";
 
     /**
      * @brief An action parsed from the command line.
@@ -59,6 +59,11 @@ public:
             MigrateSubCmd subCmd;
         };
 
+        /** @brief Verify Config action. */
+        struct VerifyConfig {
+            std::string configPath;
+        };
+
         /**
          * @brief Construct an action from a Run.
          *
@@ -66,7 +71,7 @@ public:
          */
         template <typename ActionType>
             requires std::is_same_v<ActionType, Run> or std::is_same_v<ActionType, Exit> or
-            std::is_same_v<ActionType, Migrate>
+            std::is_same_v<ActionType, Migrate> or std::is_same_v<ActionType, VerifyConfig>
         explicit Action(ActionType&& action) : action_(std::forward<ActionType>(action))
         {
         }
@@ -86,7 +91,7 @@ public:
         }
 
     private:
-        std::variant<Run, Exit, Migrate> action_;
+        std::variant<Run, Exit, Migrate, VerifyConfig> action_;
     };
 
     /**

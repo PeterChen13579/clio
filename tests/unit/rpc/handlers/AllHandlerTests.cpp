@@ -47,14 +47,14 @@
 #include "rpc/handlers/ServerInfo.hpp"
 #include "rpc/handlers/Subscribe.hpp"
 #include "rpc/handlers/TransactionEntry.hpp"
+#include "rpc/handlers/VaultInfo.hpp"
 #include "util/Assert.hpp"
 #include "util/HandlerBaseTestFixture.hpp"
 #include "util/MockAmendmentCenter.hpp"
+#include "util/MockAssert.hpp"
 #include "util/MockCounters.hpp"
 #include "util/MockCountersFixture.hpp"
-#include "util/MockETLService.hpp"
 #include "util/MockETLServiceTestFixture.hpp"
-#include "util/MockLoadBalancer.hpp"
 #include "util/MockSubscriptionManager.hpp"
 #include "util/MockWsBase.hpp"
 #include "util/TestObject.hpp"
@@ -73,13 +73,14 @@
 
 using ::testing::Types;
 using namespace rpc;
-using TestServerInfoHandler = BaseServerInfoHandler<MockLoadBalancer, MockETLService, MockCounters>;
+using TestServerInfoHandler = BaseServerInfoHandler<MockCounters>;
 
-constexpr static auto Index1 = "05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD";
-constexpr static auto AmmAccount = "rLcS7XL6nxRAi7JcbJcn1Na179oF3vdfbh";
-constexpr static auto Account = "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn";
-constexpr static auto NftID = "00010000A7CAD27B688D14BA1A9FA5366554D6ADCF9CE0875B974D9F00000004";
-constexpr static auto Currency = "0158415500000000C1F76FF6ECB0BAC600000000";
+static constexpr auto kINDEX1 = "05FB0EB4B899F056FA095537C5817163801F544BAFCEA39C995D76DB4D16F9DD";
+static constexpr auto kAMM_ACCOUNT = "rLcS7XL6nxRAi7JcbJcn1Na179oF3vdfbh";
+static constexpr auto kACCOUNT = "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn";
+static constexpr auto kNFT_ID = "00010000A7CAD27B688D14BA1A9FA5366554D6ADCF9CE0875B974D9F00000004";
+static constexpr auto kCURRENCY = "0158415500000000C1F76FF6ECB0BAC600000000";
+static constexpr auto kVAULT_ID = "61B03A6F8CEBD3AF9D8F696C3D0A9A9F0493B34BF6B5D93CF0BC009E6BA75303";
 
 using AnyHandlerType = Types<
     AccountChannelsHandler,
@@ -110,43 +111,52 @@ using AnyHandlerType = Types<
     NoRippleCheckHandler,
     TestServerInfoHandler,
     SubscribeHandler,
-    TransactionEntryHandler>;
+    TransactionEntryHandler,
+    VaultInfoHandler>;
 
 template <typename HandlerType>
-struct AllHandlersDeathTest : HandlerBaseTest,
-                              MockLoadBalancerTest,
-                              MockCountersTest,
-                              testing::WithParamInterface<std::string> {
-    AllHandlersDeathTest() : handler_{initHandler()}
+struct AllHandlersAssertTest : common::util::WithMockAssert,
+                               HandlerBaseTest,
+                               MockLoadBalancerTest,
+                               MockCountersTest,
+                               testing::WithParamInterface<std::string> {
+    AllHandlersAssertTest() : handler_{initHandler()}
     {
-        ASSERT(mockAmendmentCenterPtr.amendmentCenterMock != nullptr, "mockAmendmentCenterPtr is not initialized.");
-        ASSERT(mockSubscriptionManagerPtr.subscriptionManagerMock != nullptr, "mockSubscriptionPtr is not initialized");
+        ASSERT(mockAmendmentCenterPtr_.amendmentCenterMock != nullptr, "mockAmendmentCenterPtr is not initialized.");
+        ASSERT(
+            mockSubscriptionManagerPtr_.subscriptionManagerMock != nullptr, "mockSubscriptionPtr is not initialized"
+        );
     }
 
+protected:
     web::SubscriptionContextPtr session_ = std::make_shared<MockSession>();
     MockSession* mockSession_ = dynamic_cast<MockSession*>(session_.get());
-    StrictMockSubscriptionManagerSharedPtr mockSubscriptionManagerPtr;
-    StrictMockAmendmentCenterSharedPtr mockAmendmentCenterPtr;
+    StrictMockSubscriptionManagerSharedPtr mockSubscriptionManagerPtr_;
+    StrictMockAmendmentCenterSharedPtr mockAmendmentCenterPtr_;
     HandlerType handler_;
 
 private:
     HandlerType
     initHandler()
     {
-        if constexpr (std::is_same_v<HandlerType, AccountInfoHandler> || std::is_same_v<HandlerType, FeatureHandler>) {
-            return HandlerType{this->backend, this->mockAmendmentCenterPtr};
+        if constexpr (std::is_same_v<HandlerType, AccountInfoHandler> || std::is_same_v<HandlerType, AMMInfoHandler> ||
+                      std::is_same_v<HandlerType, LedgerHandler> || std::is_same_v<HandlerType, BookOffersHandler> ||
+                      std::is_same_v<HandlerType, FeatureHandler>) {
+            return HandlerType{this->backend_, this->mockAmendmentCenterPtr_};
         } else if constexpr (std::is_same_v<HandlerType, SubscribeHandler>) {
-            return HandlerType{this->backend, this->mockSubscriptionManagerPtr};
+            return HandlerType{this->backend_, this->mockAmendmentCenterPtr_, this->mockSubscriptionManagerPtr_};
+        } else if constexpr (std::is_same_v<HandlerType, AccountTxHandler>) {
+            return HandlerType{this->backend_, mockETLServicePtr_};
         } else if constexpr (std::is_same_v<HandlerType, TestServerInfoHandler>) {
             return HandlerType{
-                this->backend,
-                this->mockSubscriptionManagerPtr,
-                mockLoadBalancerPtr,
-                mockETLServicePtr,
-                *mockCountersPtr
+                this->backend_,
+                this->mockSubscriptionManagerPtr_,
+                mockLoadBalancerPtr_,
+                mockETLServicePtr_,
+                *mockCountersPtr_
             };
         } else {
-            return HandlerType{this->backend};
+            return HandlerType{this->backend_};
         }
     }
 };
@@ -164,8 +174,17 @@ AccountInfoHandler::Input
 createInput<AccountInfoHandler>()
 {
     AccountInfoHandler::Input input{};
-    input.account = Account;
+    input.account = kACCOUNT;
     input.ident = "asdf";
+    return input;
+}
+
+template <>
+AccountTxHandler::Input
+createInput<AccountTxHandler>()
+{
+    AccountTxHandler::Input input{};
+    input.account = kACCOUNT;
     return input;
 }
 
@@ -174,7 +193,7 @@ AMMInfoHandler::Input
 createInput<AMMInfoHandler>()
 {
     AMMInfoHandler::Input input{};
-    input.ammAccount = GetAccountIDWithString(AmmAccount);
+    input.ammAccount = getAccountIdWithString(kAMM_ACCOUNT);
     return input;
 }
 
@@ -184,9 +203,9 @@ createInput<BookOffersHandler>()
 {
     BookOffersHandler::Input input{};
     input.paysCurrency = ripple::xrpCurrency();
-    input.getsCurrency = ripple::Currency(Currency);
+    input.getsCurrency = ripple::Currency(kCURRENCY);
     input.paysID = ripple::xrpAccount();
-    input.getsID = GetAccountIDWithString(Account);
+    input.getsID = getAccountIdWithString(kACCOUNT);
 
     return input;
 }
@@ -196,7 +215,7 @@ LedgerEntryHandler::Input
 createInput<LedgerEntryHandler>()
 {
     LedgerEntryHandler::Input input{};
-    input.index = Index1;
+    input.index = kINDEX1;
     return input;
 }
 
@@ -205,7 +224,7 @@ NFTBuyOffersHandler::Input
 createInput<NFTBuyOffersHandler>()
 {
     NFTBuyOffersHandler::Input input{};
-    input.nftID = NftID;
+    input.nftID = kNFT_ID;
     return input;
 }
 
@@ -214,7 +233,7 @@ NFTInfoHandler::Input
 createInput<NFTInfoHandler>()
 {
     NFTInfoHandler::Input input{};
-    input.nftID = NftID;
+    input.nftID = kNFT_ID;
     return input;
 }
 
@@ -223,7 +242,7 @@ NFTSellOffersHandler::Input
 createInput<NFTSellOffersHandler>()
 {
     NFTSellOffersHandler::Input input{};
-    input.nftID = NftID;
+    input.nftID = kNFT_ID;
     return input;
 }
 
@@ -234,14 +253,24 @@ createInput<SubscribeHandler>()
     SubscribeHandler::Input input{};
 
     input.books = std::vector<SubscribeHandler::OrderBook>{
-        SubscribeHandler::OrderBook{.book = ripple::Book{}, .taker = Account, .snapshot = true, .both = true}
+        SubscribeHandler::OrderBook{.book = ripple::Book{}, .taker = kACCOUNT, .snapshot = true, .both = true}
     };
     return input;
 }
 
-TYPED_TEST_CASE(AllHandlersDeathTest, AnyHandlerType);
+template <>
+VaultInfoHandler::Input
+createInput<VaultInfoHandler>()
+{
+    VaultInfoHandler::Input input{};
+    input.vaultID = kVAULT_ID;
 
-TYPED_TEST(AllHandlersDeathTest, NoRangeAvailable)
+    return input;
+}
+
+TYPED_TEST_CASE(AllHandlersAssertTest, AnyHandlerType);
+
+TYPED_TEST(AllHandlersAssertTest, NoRangeAvailable)
 {
     // doesn't work without 'this'
     this->runSpawn(
@@ -251,8 +280,8 @@ TYPED_TEST(AllHandlersDeathTest, NoRangeAvailable)
             auto const input = createInput<TypeParam>();
             auto const context = Context{yield, this->session_};
 
-            EXPECT_DEATH(
-                { [[maybe_unused]] auto _unused = handler.process(input, context); }, "Assertion .* failed at .*"
+            EXPECT_CLIO_ASSERT_FAIL_WITH_MESSAGE(
+                { [[maybe_unused]] auto unused = handler.process(input, context); }, "Assertion .* failed at .*"
             );
         },
         true

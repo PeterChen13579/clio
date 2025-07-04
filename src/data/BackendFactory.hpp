@@ -21,9 +21,10 @@
 
 #include "data/BackendInterface.hpp"
 #include "data/CassandraBackend.hpp"
+#include "data/LedgerCacheInterface.hpp"
 #include "data/cassandra/SettingsProvider.hpp"
+#include "util/config/ConfigDefinition.hpp"
 #include "util/log/Logger.hpp"
-#include "util/newconfig/ConfigDefinition.hpp"
 
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/predicate.hpp>
@@ -38,12 +39,13 @@ namespace data {
  * @brief A factory function that creates the backend based on a config.
  *
  * @param config The clio config to use
+ * @param cache The ledger cache to use
  * @return A shared_ptr<BackendInterface> with the selected implementation
  */
 inline std::shared_ptr<BackendInterface>
-make_Backend(util::config::ClioConfigDefinition const& config)
+makeBackend(util::config::ClioConfigDefinition const& config, data::LedgerCacheInterface& cache)
 {
-    static util::Logger const log{"Backend"};
+    static util::Logger const log{"Backend"};  // NOLINT(readability-identifier-naming)
     LOG(log.info()) << "Constructing BackendInterface";
 
     auto const readOnly = config.get<bool>("read_only");
@@ -53,7 +55,9 @@ make_Backend(util::config::ClioConfigDefinition const& config)
 
     if (boost::iequals(type, "cassandra")) {
         auto const cfg = config.getObject("database." + type);
-        backend = std::make_shared<data::cassandra::CassandraBackend>(data::cassandra::SettingsProvider{cfg}, readOnly);
+        backend = std::make_shared<data::cassandra::CassandraBackend>(
+            data::cassandra::SettingsProvider{cfg}, cache, readOnly
+        );
     }
 
     if (!backend)

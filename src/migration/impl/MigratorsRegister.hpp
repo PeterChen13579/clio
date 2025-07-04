@@ -1,7 +1,7 @@
 //------------------------------------------------------------------------------
 /*
     This file is part of clio: https://github.com/XRPLF/clio
-    Copyright (c) 2022-2024, the clio developers.
+    Copyright (c) 2024, the clio developers.
 
     Permission to use, copy, modify, and distribute this software for any
     purpose with or without fee is hereby granted, provided that the above
@@ -22,18 +22,21 @@
 #include "data/BackendInterface.hpp"
 #include "migration/MigratiorStatus.hpp"
 #include "migration/impl/Spec.hpp"
+#include "util/Assert.hpp"
 #include "util/Concepts.hpp"
+#include "util/config/ObjectView.hpp"
 #include "util/log/Logger.hpp"
-#include "util/newconfig/ObjectView.hpp"
 
 #include <algorithm>
 #include <array>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace migration::impl {
@@ -46,6 +49,11 @@ concept MigrationBackend = requires { requires std::same_as<typename MigratorTyp
 
 template <typename Backend, typename... MigratorType>
 concept BackendMatchAllMigrators = (MigrationBackend<Backend, MigratorType> && ...);
+
+template <typename T>
+concept HasCanBlockClio = requires(T t) {
+    { t.kCAN_BLOCK_CLIO };
+};
 
 /**
  *@brief The register of migrators. It will dispatch the migration to the corresponding migrator. It also
@@ -66,7 +74,7 @@ class MigratorsRegister {
     void
     callMigration(std::string const& name, util::config::ObjectView const& config)
     {
-        if (name == Migrator::name) {
+        if (name == Migrator::kNAME) {
             LOG(log_.info()) << "Running migration: " << name;
             Migrator::runMigration(backend_, config);
             backend_->writeMigratorStatus(name, MigratorStatus(MigratorStatus::Migrated).toString());
@@ -78,7 +86,24 @@ class MigratorsRegister {
     static constexpr std::string_view
     getDescriptionIfMatch(std::string_view targetName)
     {
-        return (T::name == targetName) ? T::description : "";
+        return (T::kNAME == targetName) ? T::kDESCRIPTION : "";
+    }
+
+    template <typename First, typename... Rest>
+    static constexpr bool
+    canBlockClioHelper(std::string_view targetName)
+    {
+        if (targetName == First::kNAME) {
+            if constexpr (HasCanBlockClio<First>) {
+                return First::kCAN_BLOCK_CLIO;
+            }
+            return false;
+        }
+        if constexpr (sizeof...(Rest) > 0) {
+            return canBlockClioHelper<Rest...>(targetName);
+        }
+        ASSERT(false, "The migrator name is not found");
+        std::unreachable();
     }
 
 public:
@@ -156,7 +181,7 @@ public:
     constexpr auto
     getMigratorNames() const
     {
-        return std::array<std::string_view, sizeof...(MigratorType)>{MigratorType::name...};
+        return std::array<std::string_view, sizeof...(MigratorType)>{MigratorType::kNAME...};
     }
 
     /**
@@ -177,6 +202,27 @@ public:
             }(name) + ...);
 
             return result.empty() ? "No Description" : result;
+        }
+    }
+
+    /**
+     * @brief Return if the given migrator can block Clio server
+     *
+     * @param name The migrator's name
+     * @return std::nullopt if the migrator name is not found, or a boolean value indicating whether the migrator is
+     * blocking Clio server.
+     */
+    std::optional<bool>
+    canMigratorBlockClio(std::string_view name) const
+    {
+        if constexpr (sizeof...(MigratorType) == 0) {
+            return std::nullopt;
+        } else {
+            auto const migratiors = getMigratorNames();
+            if (std::ranges::find(migratiors, name) == migratiors.end())
+                return std::nullopt;
+
+            return canBlockClioHelper<MigratorType...>(name);
         }
     }
 };

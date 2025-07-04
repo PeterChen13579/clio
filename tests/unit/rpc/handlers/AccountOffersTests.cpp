@@ -43,19 +43,24 @@
 #include <string>
 #include <vector>
 
-constexpr static auto ACCOUNT = "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn";
-constexpr static auto ACCOUNT2 = "rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun";
-constexpr static auto LEDGERHASH = "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652";
-constexpr static auto INDEX1 = "1B8590C01B0006EDFA9ED60296DD052DC5E90F99659B25014D08E1BC983515BC";
+namespace {
+
+constexpr auto kACCOUNT = "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn";
+constexpr auto kACCOUNT2 = "rLEsXccBGNR3UPuPu2hUXPjziKC3qKSBun";
+constexpr auto kLEDGER_HASH = "4BC50C9B0D8515D3EAAE1E74B29A95804346C491EE1A95BF25E4AAB854A6A652";
+constexpr auto kINDEX1 = "1B8590C01B0006EDFA9ED60296DD052DC5E90F99659B25014D08E1BC983515BC";
+
+}  // namespace
 
 using namespace rpc;
+using namespace data;
 namespace json = boost::json;
 using namespace testing;
 
 struct RPCAccountOffersHandlerTest : HandlerBaseTest {
     RPCAccountOffersHandlerTest()
     {
-        backend->setRange(10, 30);
+        backend_->setRange(10, 30);
     }
 };
 
@@ -76,67 +81,67 @@ generateTestValuesForParametersTest()
     return std::vector<AccountOfferParamTestCaseBundle>{
         {
             .testName = "AccountMissing",
-            .testJson = R"({})",
+            .testJson = R"JSON({})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Required field 'account' missing",
         },
         {
             .testName = "AccountNotString",
-            .testJson = R"({"account": 123})",
+            .testJson = R"JSON({"account": 123})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "accountNotString",
         },
         {
             .testName = "AccountInvalid",
-            .testJson = R"({"account": "123"})",
+            .testJson = R"JSON({"account": "123"})JSON",
             .expectedError = "actMalformed",
             .expectedErrorMessage = "accountMalformed",
         },
         {
             .testName = "LedgerHashInvalid",
-            .testJson = R"({"account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", "ledger_hash": "x"})",
+            .testJson = R"JSON({"account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", "ledger_hash": "x"})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "ledger_hashMalformed",
         },
         {
             .testName = "LedgerHashNotString",
-            .testJson = R"({"account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", "ledger_hash": 123})",
+            .testJson = R"JSON({"account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", "ledger_hash": 123})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "ledger_hashNotString",
         },
         {
             .testName = "LedgerIndexNotInt",
-            .testJson = R"({"account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", "ledger_index": "x"})",
+            .testJson = R"JSON({"account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", "ledger_index": "x"})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "ledgerIndexMalformed",
         },
         {
             .testName = "LimitNotInt",
-            .testJson = R"({"account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", "limit": "x"})",
+            .testJson = R"JSON({"account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", "limit": "x"})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters.",
         },
         {
             .testName = "LimitNegative",
-            .testJson = R"({"account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", "limit": -1})",
+            .testJson = R"JSON({"account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", "limit": -1})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters.",
         },
         {
             .testName = "LimitZero",
-            .testJson = R"({"account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", "limit": 0})",
+            .testJson = R"JSON({"account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", "limit": 0})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Invalid parameters.",
         },
         {
             .testName = "MarkerNotString",
-            .testJson = R"({"account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", "marker": 123})",
+            .testJson = R"JSON({"account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", "marker": 123})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "markerNotString",
         },
         {
             .testName = "MarkerInvalid",
-            .testJson = R"({"account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", "marker": "12;xxx"})",
+            .testJson = R"JSON({"account": "rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", "marker": "12;xxx"})JSON",
             .expectedError = "invalidParams",
             .expectedErrorMessage = "Malformed cursor.",
         },
@@ -147,14 +152,14 @@ INSTANTIATE_TEST_CASE_P(
     RPCAccountOffersGroup1,
     AccountOfferParameterTest,
     ValuesIn(generateTestValuesForParametersTest()),
-    tests::util::NameGenerator
+    tests::util::kNAME_GENERATOR
 );
 
 TEST_P(AccountOfferParameterTest, InvalidParams)
 {
     auto const testBundle = GetParam();
     runSpawn([&, this](auto yield) {
-        auto const handler = AnyHandler{AccountOffersHandler{backend}};
+        auto const handler = AnyHandler{AccountOffersHandler{backend_}};
         auto const req = json::parse(testBundle.testJson);
         auto const output = handler.process(req, Context{yield});
         ASSERT_FALSE(output);
@@ -166,22 +171,22 @@ TEST_P(AccountOfferParameterTest, InvalidParams)
 
 TEST_F(RPCAccountOffersHandlerTest, LedgerNotFoundViaHash)
 {
-    EXPECT_CALL(*backend, fetchLedgerByHash).Times(1);
+    EXPECT_CALL(*backend_, fetchLedgerByHash).Times(1);
     // return empty ledgerHeader
-    ON_CALL(*backend, fetchLedgerByHash(ripple::uint256{LEDGERHASH}, _))
+    ON_CALL(*backend_, fetchLedgerByHash(ripple::uint256{kLEDGER_HASH}, _))
         .WillByDefault(Return(std::optional<ripple::LedgerHeader>{}));
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
-            "account":"{}",
-            "ledger_hash":"{}"
-        }})",
-        ACCOUNT,
-        LEDGERHASH
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
+            "account": "{}",
+            "ledger_hash": "{}"
+        }})JSON",
+        kACCOUNT,
+        kLEDGER_HASH
     ));
-    auto const handler = AnyHandler{AccountOffersHandler{backend}};
+    auto const handler = AnyHandler{AccountOffersHandler{backend_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "lgrNotFound");
@@ -191,23 +196,23 @@ TEST_F(RPCAccountOffersHandlerTest, LedgerNotFoundViaHash)
 
 TEST_F(RPCAccountOffersHandlerTest, LedgerNotFoundViaStringIndex)
 {
-    auto constexpr seq = 12;
+    constexpr auto kSEQ = 12;
 
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
     // return empty ledgerHeader
-    ON_CALL(*backend, fetchLedgerBySequence(seq, _)).WillByDefault(Return(std::optional<ripple::LedgerHeader>{}));
+    ON_CALL(*backend_, fetchLedgerBySequence(kSEQ, _)).WillByDefault(Return(std::optional<ripple::LedgerHeader>{}));
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
-            "account":"{}",
-            "ledger_index":"{}"
-        }})",
-        ACCOUNT,
-        seq
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
+            "account": "{}",
+            "ledger_index": "{}"
+        }})JSON",
+        kACCOUNT,
+        kSEQ
     ));
-    auto const handler = AnyHandler{AccountOffersHandler{backend}};
+    auto const handler = AnyHandler{AccountOffersHandler{backend_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "lgrNotFound");
@@ -217,23 +222,23 @@ TEST_F(RPCAccountOffersHandlerTest, LedgerNotFoundViaStringIndex)
 
 TEST_F(RPCAccountOffersHandlerTest, LedgerNotFoundViaIntIndex)
 {
-    auto constexpr seq = 12;
+    constexpr auto kSEQ = 12;
 
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
     // return empty ledgerHeader
-    ON_CALL(*backend, fetchLedgerBySequence(seq, _)).WillByDefault(Return(std::optional<ripple::LedgerHeader>{}));
+    ON_CALL(*backend_, fetchLedgerBySequence(kSEQ, _)).WillByDefault(Return(std::optional<ripple::LedgerHeader>{}));
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
-            "account":"{}",
-            "ledger_index":{}
-        }})",
-        ACCOUNT,
-        seq
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
+            "account": "{}",
+            "ledger_index": {}
+        }})JSON",
+        kACCOUNT,
+        kSEQ
     ));
-    auto const handler = AnyHandler{AccountOffersHandler{backend}};
+    auto const handler = AnyHandler{AccountOffersHandler{backend_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "lgrNotFound");
@@ -243,22 +248,22 @@ TEST_F(RPCAccountOffersHandlerTest, LedgerNotFoundViaIntIndex)
 
 TEST_F(RPCAccountOffersHandlerTest, AccountNotFound)
 {
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, 30);
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, 30);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
 
-    ON_CALL(*backend, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
-    ON_CALL(*backend, doFetchLedgerObject).WillByDefault(Return(std::optional<Blob>{}));
-    EXPECT_CALL(*backend, doFetchLedgerObject).Times(1);
+    ON_CALL(*backend_, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
+    ON_CALL(*backend_, doFetchLedgerObject).WillByDefault(Return(std::optional<Blob>{}));
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(1);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
-            "account":"{}"
-        }})",
-        ACCOUNT
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
+            "account": "{}"
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{AccountOffersHandler{backend}};
+    auto const handler = AnyHandler{AccountOffersHandler{backend_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "actNotFound");
@@ -269,73 +274,73 @@ TEST_F(RPCAccountOffersHandlerTest, AccountNotFound)
 TEST_F(RPCAccountOffersHandlerTest, DefaultParams)
 {
     auto const expectedOutput = fmt::format(
-        R"({{
-            "ledger_hash":"{}",
-            "ledger_index":30,
-            "validated":true,
-            "account":"{}",
+        R"JSON({{
+            "ledger_hash": "{}",
+            "ledger_index": 30,
+            "validated": true,
+            "account": "{}",
             "offers":
             [
                 {{
-                    "seq":0,
-                    "flags":0,
-                    "quality":"0.000000024999999374023",
-                    "taker_pays":"20",
+                    "seq": 0,
+                    "flags": 0,
+                    "quality": "0.000000024999999374023",
+                    "taker_pays": "20",
                     "taker_gets":
                     {{
-                        "currency":"USD",
-                        "issuer":"{}",
-                        "value":"10"
+                        "currency": "USD",
+                        "issuer": "{}",
+                        "value": "10"
                     }},
-                    "expiration":123
+                    "expiration": 123
                 }}
             ]
-        }})",
-        LEDGERHASH,
-        ACCOUNT,
-        ACCOUNT2
+        }})JSON",
+        kLEDGER_HASH,
+        kACCOUNT,
+        kACCOUNT2
     );
-    auto constexpr ledgerSeq = 30;
+    constexpr auto kLEDGER_SEQ = 30;
 
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, ledgerSeq);
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, kLEDGER_SEQ);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
 
-    ON_CALL(*backend, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
-    auto const accountKk = ripple::keylet::account(GetAccountIDWithString(ACCOUNT)).key;
-    ON_CALL(*backend, doFetchLedgerObject(accountKk, ledgerSeq, _)).WillByDefault(Return(Blob{'f', 'a', 'k', 'e'}));
+    ON_CALL(*backend_, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
+    auto const accountKk = ripple::keylet::account(getAccountIdWithString(kACCOUNT)).key;
+    ON_CALL(*backend_, doFetchLedgerObject(accountKk, kLEDGER_SEQ, _)).WillByDefault(Return(Blob{'f', 'a', 'k', 'e'}));
 
-    auto const ownerDir = CreateOwnerDirLedgerObject({ripple::uint256{INDEX1}}, INDEX1);
-    auto const ownerDirKk = ripple::keylet::ownerDir(GetAccountIDWithString(ACCOUNT)).key;
-    ON_CALL(*backend, doFetchLedgerObject(ownerDirKk, ledgerSeq, _))
+    auto const ownerDir = createOwnerDirLedgerObject({ripple::uint256{kINDEX1}}, kINDEX1);
+    auto const ownerDirKk = ripple::keylet::ownerDir(getAccountIdWithString(kACCOUNT)).key;
+    ON_CALL(*backend_, doFetchLedgerObject(ownerDirKk, kLEDGER_SEQ, _))
         .WillByDefault(Return(ownerDir.getSerializer().peekData()));
-    EXPECT_CALL(*backend, doFetchLedgerObject).Times(2);
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(2);
 
     std::vector<Blob> bbs;
-    auto offer = CreateOfferLedgerObject(
-        ACCOUNT,
+    auto offer = createOfferLedgerObject(
+        kACCOUNT,
         10,
         20,
         ripple::to_string(ripple::to_currency("USD")),
         ripple::to_string(ripple::xrpCurrency()),
-        ACCOUNT2,
+        kACCOUNT2,
         toBase58(ripple::xrpAccount()),
-        INDEX1
+        kINDEX1
     );
     offer.setFieldU32(ripple::sfExpiration, 123);
     bbs.push_back(offer.getSerializer().peekData());
 
-    ON_CALL(*backend, doFetchLedgerObjects).WillByDefault(Return(bbs));
-    EXPECT_CALL(*backend, doFetchLedgerObjects).Times(1);
+    ON_CALL(*backend_, doFetchLedgerObjects).WillByDefault(Return(bbs));
+    EXPECT_CALL(*backend_, doFetchLedgerObjects).Times(1);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
-            "account":"{}"
-        }})",
-        ACCOUNT
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
+            "account": "{}"
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{AccountOffersHandler{backend}};
+    auto const handler = AnyHandler{AccountOffersHandler{backend_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_TRUE(output);
         EXPECT_EQ(*output.result, json::parse(expectedOutput));
     });
@@ -343,103 +348,103 @@ TEST_F(RPCAccountOffersHandlerTest, DefaultParams)
 
 TEST_F(RPCAccountOffersHandlerTest, Limit)
 {
-    auto constexpr ledgerSeq = 30;
+    constexpr auto kLEDGER_SEQ = 30;
 
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, ledgerSeq);
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, kLEDGER_SEQ);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
 
-    ON_CALL(*backend, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
-    auto const accountKk = ripple::keylet::account(GetAccountIDWithString(ACCOUNT)).key;
-    ON_CALL(*backend, doFetchLedgerObject(accountKk, ledgerSeq, _)).WillByDefault(Return(Blob{'f', 'a', 'k', 'e'}));
+    ON_CALL(*backend_, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
+    auto const accountKk = ripple::keylet::account(getAccountIdWithString(kACCOUNT)).key;
+    ON_CALL(*backend_, doFetchLedgerObject(accountKk, kLEDGER_SEQ, _)).WillByDefault(Return(Blob{'f', 'a', 'k', 'e'}));
 
-    auto const ownerDir = CreateOwnerDirLedgerObject(std::vector{20, ripple::uint256{INDEX1}}, INDEX1);
-    auto const ownerDirKk = ripple::keylet::ownerDir(GetAccountIDWithString(ACCOUNT)).key;
-    ON_CALL(*backend, doFetchLedgerObject(ownerDirKk, ledgerSeq, _))
+    auto const ownerDir = createOwnerDirLedgerObject(std::vector{20, ripple::uint256{kINDEX1}}, kINDEX1);
+    auto const ownerDirKk = ripple::keylet::ownerDir(getAccountIdWithString(kACCOUNT)).key;
+    ON_CALL(*backend_, doFetchLedgerObject(ownerDirKk, kLEDGER_SEQ, _))
         .WillByDefault(Return(ownerDir.getSerializer().peekData()));
-    EXPECT_CALL(*backend, doFetchLedgerObject).Times(2);
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(2);
 
     std::vector<Blob> bbs;
     for (auto i = 0; i < 20; i++) {
-        auto const offer = CreateOfferLedgerObject(
-            ACCOUNT,
+        auto const offer = createOfferLedgerObject(
+            kACCOUNT,
             10,
             20,
             ripple::to_string(ripple::to_currency("USD")),
             ripple::to_string(ripple::xrpCurrency()),
-            ACCOUNT2,
+            kACCOUNT2,
             toBase58(ripple::xrpAccount()),
-            INDEX1
+            kINDEX1
         );
         bbs.push_back(offer.getSerializer().peekData());
     }
-    ON_CALL(*backend, doFetchLedgerObjects).WillByDefault(Return(bbs));
-    EXPECT_CALL(*backend, doFetchLedgerObjects).Times(1);
+    ON_CALL(*backend_, doFetchLedgerObjects).WillByDefault(Return(bbs));
+    EXPECT_CALL(*backend_, doFetchLedgerObjects).Times(1);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
-            "account":"{}",
-            "limit":10
-        }})",
-        ACCOUNT
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
+            "account": "{}",
+            "limit": 10
+        }})JSON",
+        kACCOUNT
     ));
-    auto const handler = AnyHandler{AccountOffersHandler{backend}};
+    auto const handler = AnyHandler{AccountOffersHandler{backend_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_TRUE(output);
         EXPECT_EQ(output.result->at("offers").as_array().size(), 10);
-        EXPECT_EQ(output.result->at("marker").as_string(), fmt::format("{},0", INDEX1));
+        EXPECT_EQ(output.result->at("marker").as_string(), fmt::format("{},0", kINDEX1));
     });
 }
 
 TEST_F(RPCAccountOffersHandlerTest, Marker)
 {
-    auto constexpr ledgerSeq = 30;
+    constexpr auto kLEDGER_SEQ = 30;
 
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, ledgerSeq);
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, kLEDGER_SEQ);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
 
-    ON_CALL(*backend, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
-    auto const accountKk = ripple::keylet::account(GetAccountIDWithString(ACCOUNT)).key;
-    ON_CALL(*backend, doFetchLedgerObject(accountKk, ledgerSeq, _)).WillByDefault(Return(Blob{'f', 'a', 'k', 'e'}));
+    ON_CALL(*backend_, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
+    auto const accountKk = ripple::keylet::account(getAccountIdWithString(kACCOUNT)).key;
+    ON_CALL(*backend_, doFetchLedgerObject(accountKk, kLEDGER_SEQ, _)).WillByDefault(Return(Blob{'f', 'a', 'k', 'e'}));
 
     auto const startPage = 2;
-    auto const ownerDir = CreateOwnerDirLedgerObject(std::vector{20, ripple::uint256{INDEX1}}, INDEX1);
-    auto const ownerDirKk = ripple::keylet::ownerDir(GetAccountIDWithString(ACCOUNT)).key;
+    auto const ownerDir = createOwnerDirLedgerObject(std::vector{20, ripple::uint256{kINDEX1}}, kINDEX1);
+    auto const ownerDirKk = ripple::keylet::ownerDir(getAccountIdWithString(kACCOUNT)).key;
     auto const hintIndex = ripple::keylet::page(ownerDirKk, startPage).key;
 
-    ON_CALL(*backend, doFetchLedgerObject(hintIndex, ledgerSeq, _))
+    ON_CALL(*backend_, doFetchLedgerObject(hintIndex, kLEDGER_SEQ, _))
         .WillByDefault(Return(ownerDir.getSerializer().peekData()));
-    EXPECT_CALL(*backend, doFetchLedgerObject).Times(3);
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(3);
 
     std::vector<Blob> bbs;
     for (auto i = 0; i < 20; i++) {
-        auto const offer = CreateOfferLedgerObject(
-            ACCOUNT,
+        auto const offer = createOfferLedgerObject(
+            kACCOUNT,
             10,
             20,
             ripple::to_string(ripple::to_currency("USD")),
             ripple::to_string(ripple::xrpCurrency()),
-            ACCOUNT2,
+            kACCOUNT2,
             toBase58(ripple::xrpAccount()),
-            INDEX1
+            kINDEX1
         );
         bbs.push_back(offer.getSerializer().peekData());
     }
-    ON_CALL(*backend, doFetchLedgerObjects).WillByDefault(Return(bbs));
-    EXPECT_CALL(*backend, doFetchLedgerObjects).Times(1);
+    ON_CALL(*backend_, doFetchLedgerObjects).WillByDefault(Return(bbs));
+    EXPECT_CALL(*backend_, doFetchLedgerObjects).Times(1);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
-            "account":"{}",
-            "marker":"{},{}"
-        }})",
-        ACCOUNT,
-        INDEX1,
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
+            "account": "{}",
+            "marker": "{},{}"
+        }})JSON",
+        kACCOUNT,
+        kINDEX1,
         startPage
     ));
-    auto const handler = AnyHandler{AccountOffersHandler{backend}};
+    auto const handler = AnyHandler{AccountOffersHandler{backend_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_TRUE(output);
         EXPECT_EQ(output.result->at("offers").as_array().size(), 19);
         EXPECT_FALSE(output.result->as_object().contains("marker"));
@@ -448,34 +453,34 @@ TEST_F(RPCAccountOffersHandlerTest, Marker)
 
 TEST_F(RPCAccountOffersHandlerTest, MarkerNotExists)
 {
-    auto constexpr ledgerSeq = 30;
+    constexpr auto kLEDGER_SEQ = 30;
 
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, ledgerSeq);
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, kLEDGER_SEQ);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
 
-    ON_CALL(*backend, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
-    auto const accountKk = ripple::keylet::account(GetAccountIDWithString(ACCOUNT)).key;
-    ON_CALL(*backend, doFetchLedgerObject(accountKk, ledgerSeq, _)).WillByDefault(Return(Blob{'f', 'a', 'k', 'e'}));
+    ON_CALL(*backend_, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
+    auto const accountKk = ripple::keylet::account(getAccountIdWithString(kACCOUNT)).key;
+    ON_CALL(*backend_, doFetchLedgerObject(accountKk, kLEDGER_SEQ, _)).WillByDefault(Return(Blob{'f', 'a', 'k', 'e'}));
 
     auto const startPage = 2;
-    auto const ownerDirKk = ripple::keylet::ownerDir(GetAccountIDWithString(ACCOUNT)).key;
+    auto const ownerDirKk = ripple::keylet::ownerDir(getAccountIdWithString(kACCOUNT)).key;
     auto const hintIndex = ripple::keylet::page(ownerDirKk, startPage).key;
 
-    ON_CALL(*backend, doFetchLedgerObject(hintIndex, ledgerSeq, _)).WillByDefault(Return(std::nullopt));
-    EXPECT_CALL(*backend, doFetchLedgerObject).Times(2);
+    ON_CALL(*backend_, doFetchLedgerObject(hintIndex, kLEDGER_SEQ, _)).WillByDefault(Return(std::nullopt));
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(2);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
-            "account":"{}",
-            "marker":"{},{}"
-        }})",
-        ACCOUNT,
-        INDEX1,
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
+            "account": "{}",
+            "marker": "{},{}"
+        }})JSON",
+        kACCOUNT,
+        kINDEX1,
         startPage
     ));
-    auto const handler = AnyHandler{AccountOffersHandler{backend}};
+    auto const handler = AnyHandler{AccountOffersHandler{backend_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_FALSE(output);
         auto const err = rpc::makeError(output.result.error());
         EXPECT_EQ(err.at("error").as_string(), "invalidParams");
@@ -485,109 +490,111 @@ TEST_F(RPCAccountOffersHandlerTest, MarkerNotExists)
 
 TEST_F(RPCAccountOffersHandlerTest, LimitLessThanMin)
 {
-    auto constexpr ledgerSeq = 30;
+    constexpr auto kLEDGER_SEQ = 30;
 
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, ledgerSeq);
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, kLEDGER_SEQ);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
 
-    ON_CALL(*backend, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
-    auto const accountKk = ripple::keylet::account(GetAccountIDWithString(ACCOUNT)).key;
-    ON_CALL(*backend, doFetchLedgerObject(accountKk, ledgerSeq, _)).WillByDefault(Return(Blob{'f', 'a', 'k', 'e'}));
+    ON_CALL(*backend_, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
+    auto const accountKk = ripple::keylet::account(getAccountIdWithString(kACCOUNT)).key;
+    ON_CALL(*backend_, doFetchLedgerObject(accountKk, kLEDGER_SEQ, _)).WillByDefault(Return(Blob{'f', 'a', 'k', 'e'}));
 
-    auto const ownerDir =
-        CreateOwnerDirLedgerObject(std::vector{AccountOffersHandler::LIMIT_MIN + 1, ripple::uint256{INDEX1}}, INDEX1);
-    auto const ownerDirKk = ripple::keylet::ownerDir(GetAccountIDWithString(ACCOUNT)).key;
-    ON_CALL(*backend, doFetchLedgerObject(ownerDirKk, ledgerSeq, _))
+    auto const ownerDir = createOwnerDirLedgerObject(
+        std::vector{AccountOffersHandler::kLIMIT_MIN + 1, ripple::uint256{kINDEX1}}, kINDEX1
+    );
+    auto const ownerDirKk = ripple::keylet::ownerDir(getAccountIdWithString(kACCOUNT)).key;
+    ON_CALL(*backend_, doFetchLedgerObject(ownerDirKk, kLEDGER_SEQ, _))
         .WillByDefault(Return(ownerDir.getSerializer().peekData()));
-    EXPECT_CALL(*backend, doFetchLedgerObject).Times(2);
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(2);
 
     std::vector<Blob> bbs;
-    auto offer = CreateOfferLedgerObject(
-        ACCOUNT,
+    auto offer = createOfferLedgerObject(
+        kACCOUNT,
         10,
         20,
         ripple::to_string(ripple::to_currency("USD")),
         ripple::to_string(ripple::xrpCurrency()),
-        ACCOUNT2,
+        kACCOUNT2,
         toBase58(ripple::xrpAccount()),
-        INDEX1
+        kINDEX1
     );
     offer.setFieldU32(ripple::sfExpiration, 123);
 
-    bbs.reserve(AccountOffersHandler::LIMIT_MIN + 1);
-    for (auto i = 0; i < AccountOffersHandler::LIMIT_MIN + 1; i++)
+    bbs.reserve(AccountOffersHandler::kLIMIT_MIN + 1);
+    for (auto i = 0; i < AccountOffersHandler::kLIMIT_MIN + 1; i++)
         bbs.push_back(offer.getSerializer().peekData());
 
-    ON_CALL(*backend, doFetchLedgerObjects).WillByDefault(Return(bbs));
-    EXPECT_CALL(*backend, doFetchLedgerObjects).Times(1);
+    ON_CALL(*backend_, doFetchLedgerObjects).WillByDefault(Return(bbs));
+    EXPECT_CALL(*backend_, doFetchLedgerObjects).Times(1);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
-            "account":"{}",
-            "limit":{}
-        }})",
-        ACCOUNT,
-        AccountOffersHandler::LIMIT_MIN - 1
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
+            "account": "{}",
+            "limit": {}
+        }})JSON",
+        kACCOUNT,
+        AccountOffersHandler::kLIMIT_MIN - 1
     ));
-    auto const handler = AnyHandler{AccountOffersHandler{backend}};
+    auto const handler = AnyHandler{AccountOffersHandler{backend_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_TRUE(output);
-        EXPECT_EQ(output.result->at("offers").as_array().size(), AccountOffersHandler::LIMIT_MIN);
+        EXPECT_EQ(output.result->at("offers").as_array().size(), AccountOffersHandler::kLIMIT_MIN);
     });
 }
 
 TEST_F(RPCAccountOffersHandlerTest, LimitMoreThanMax)
 {
-    auto constexpr ledgerSeq = 30;
+    constexpr auto kLEDGER_SEQ = 30;
 
-    auto const ledgerHeader = CreateLedgerHeader(LEDGERHASH, ledgerSeq);
-    EXPECT_CALL(*backend, fetchLedgerBySequence).Times(1);
+    auto const ledgerHeader = createLedgerHeader(kLEDGER_HASH, kLEDGER_SEQ);
+    EXPECT_CALL(*backend_, fetchLedgerBySequence).Times(1);
 
-    ON_CALL(*backend, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
-    auto const accountKk = ripple::keylet::account(GetAccountIDWithString(ACCOUNT)).key;
-    ON_CALL(*backend, doFetchLedgerObject(accountKk, ledgerSeq, _)).WillByDefault(Return(Blob{'f', 'a', 'k', 'e'}));
+    ON_CALL(*backend_, fetchLedgerBySequence).WillByDefault(Return(ledgerHeader));
+    auto const accountKk = ripple::keylet::account(getAccountIdWithString(kACCOUNT)).key;
+    ON_CALL(*backend_, doFetchLedgerObject(accountKk, kLEDGER_SEQ, _)).WillByDefault(Return(Blob{'f', 'a', 'k', 'e'}));
 
-    auto const ownerDir =
-        CreateOwnerDirLedgerObject(std::vector{AccountOffersHandler::LIMIT_MAX + 1, ripple::uint256{INDEX1}}, INDEX1);
+    auto const ownerDir = createOwnerDirLedgerObject(
+        std::vector{AccountOffersHandler::kLIMIT_MAX + 1, ripple::uint256{kINDEX1}}, kINDEX1
+    );
 
-    auto const ownerDirKk = ripple::keylet::ownerDir(GetAccountIDWithString(ACCOUNT)).key;
-    ON_CALL(*backend, doFetchLedgerObject(ownerDirKk, ledgerSeq, _))
+    auto const ownerDirKk = ripple::keylet::ownerDir(getAccountIdWithString(kACCOUNT)).key;
+    ON_CALL(*backend_, doFetchLedgerObject(ownerDirKk, kLEDGER_SEQ, _))
         .WillByDefault(Return(ownerDir.getSerializer().peekData()));
-    EXPECT_CALL(*backend, doFetchLedgerObject).Times(2);
+    EXPECT_CALL(*backend_, doFetchLedgerObject).Times(2);
 
     std::vector<Blob> bbs;
-    auto offer = CreateOfferLedgerObject(
-        ACCOUNT,
+    auto offer = createOfferLedgerObject(
+        kACCOUNT,
         10,
         20,
         ripple::to_string(ripple::to_currency("USD")),
         ripple::to_string(ripple::xrpCurrency()),
-        ACCOUNT2,
+        kACCOUNT2,
         toBase58(ripple::xrpAccount()),
-        INDEX1
+        kINDEX1
     );
     offer.setFieldU32(ripple::sfExpiration, 123);
-    bbs.reserve(AccountOffersHandler::LIMIT_MAX + 1);
-    for (auto i = 0; i < AccountOffersHandler::LIMIT_MAX + 1; i++)
+    bbs.reserve(AccountOffersHandler::kLIMIT_MAX + 1);
+    for (auto i = 0; i < AccountOffersHandler::kLIMIT_MAX + 1; i++)
         bbs.push_back(offer.getSerializer().peekData());
 
-    ON_CALL(*backend, doFetchLedgerObjects).WillByDefault(Return(bbs));
-    EXPECT_CALL(*backend, doFetchLedgerObjects).Times(1);
+    ON_CALL(*backend_, doFetchLedgerObjects).WillByDefault(Return(bbs));
+    EXPECT_CALL(*backend_, doFetchLedgerObjects).Times(1);
 
-    auto static const input = json::parse(fmt::format(
-        R"({{
-            "account":"{}",
-            "limit":{}
-        }})",
-        ACCOUNT,
-        AccountOffersHandler::LIMIT_MAX + 1
+    static auto const kINPUT = json::parse(fmt::format(
+        R"JSON({{
+            "account": "{}",
+            "limit": {}
+        }})JSON",
+        kACCOUNT,
+        AccountOffersHandler::kLIMIT_MAX + 1
     ));
-    auto const handler = AnyHandler{AccountOffersHandler{backend}};
+    auto const handler = AnyHandler{AccountOffersHandler{backend_}};
     runSpawn([&](auto yield) {
-        auto const output = handler.process(input, Context{yield});
+        auto const output = handler.process(kINPUT, Context{yield});
         ASSERT_TRUE(output);
-        EXPECT_EQ(output.result->at("offers").as_array().size(), AccountOffersHandler::LIMIT_MAX);
+        EXPECT_EQ(output.result->at("offers").as_array().size(), AccountOffersHandler::kLIMIT_MAX);
     });
 }
 
@@ -609,7 +616,7 @@ TEST(RPCAccountOffersHandlerSpecTest, DeprecatedFields)
     auto const& warning = warnings[0].as_object();
     ASSERT_TRUE(warning.contains("id"));
     ASSERT_TRUE(warning.contains("message"));
-    EXPECT_EQ(warning.at("id").as_int64(), static_cast<int64_t>(rpc::WarningCode::warnRPC_DEPRECATED));
+    EXPECT_EQ(warning.at("id").as_int64(), static_cast<int64_t>(rpc::WarningCode::WarnRpcDeprecated));
     for (auto const& field : {"ledger", "strict"}) {
         EXPECT_NE(
             warning.at("message").as_string().find(fmt::format("Field '{}' is deprecated.", field)), std::string::npos

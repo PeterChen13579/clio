@@ -39,7 +39,7 @@ public:
     using DataType = std::optional<RawDataType>;
     using QueueType = ThreadSafeQueue<DataType>;  // TODO: probably should use boost::lockfree::queue instead?
 
-    constexpr static auto TOTAL_MAX_IN_QUEUE = 1000u;
+    static constexpr auto kTOTAL_MAX_IN_QUEUE = 1000u;
 
 private:
     util::Logger log_{"ETL"};
@@ -58,7 +58,7 @@ public:
      */
     ExtractionDataPipe(uint32_t stride, uint32_t startSequence) : stride_{stride}, startSequence_{startSequence}
     {
-        auto const maxQueueSize = TOTAL_MAX_IN_QUEUE / stride;
+        auto const maxQueueSize = kTOTAL_MAX_IN_QUEUE / stride;
         for (size_t i = 0; i < stride_; ++i)
             queues_.push_back(std::make_unique<QueueType>(maxQueueSize));
     }
@@ -66,7 +66,7 @@ public:
     /**
      * @brief Push new data package for the specified sequence.
      *
-     * Note: Potentially blocks until the underlying queue can accomodate another entry.
+     * Note: Potentially blocks until the underlying queue can accommodate another entry.
      *
      * @param sequence The sequence for which to enqueue the data package
      * @param data The data to store

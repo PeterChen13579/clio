@@ -21,13 +21,17 @@
 #include "etl/ETLHelpers.hpp"
 #include "etl/impl/GrpcSource.hpp"
 #include "etlng/InitialLoadObserverInterface.hpp"
+#include "etlng/LoadBalancerInterface.hpp"
 #include "etlng/Models.hpp"
 #include "etlng/impl/GrpcSource.hpp"
+#include "util/AsioContextTestFixture.hpp"
 #include "util/Assert.hpp"
 #include "util/LoggerFixtures.hpp"
 #include "util/MockXrpLedgerAPIService.hpp"
+#include "util/Mutex.hpp"
 #include "util/TestObject.hpp"
 
+#include <boost/asio/spawn.hpp>
 #include <gmock/gmock.h>
 #include <grpcpp/server_context.h>
 #include <grpcpp/support/status.h>
@@ -38,9 +42,11 @@
 #include <xrpl/basics/strHex.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <future>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -61,7 +67,7 @@ struct MockLoadObserver : etlng::InitialLoadObserverInterface {
     );
 };
 
-struct GrpcSourceNgTests : NoLoggerFixture, tests::util::WithMockXrpLedgerAPIService {
+struct GrpcSourceNgTests : virtual NoLoggerFixture, tests::util::WithMockXrpLedgerAPIService {
     GrpcSourceNgTests()
         : WithMockXrpLedgerAPIService("localhost:0"), grpcSource_("localhost", std::to_string(getXRPLMockPort()))
     {
@@ -69,9 +75,9 @@ struct GrpcSourceNgTests : NoLoggerFixture, tests::util::WithMockXrpLedgerAPISer
 
     class KeyStore {
         std::vector<ripple::uint256> keys_;
-        std::map<std::string, std::queue<ripple::uint256>, std::greater<>> store_;
+        using Store = std::map<std::string, std::queue<ripple::uint256>, std::greater<>>;
 
-        std::mutex mtx_;
+        util::Mutex<Store> store_;
 
     public:
         KeyStore(std::size_t totalKeys, std::size_t numMarkers) : keys_(etl::getMarkers(totalKeys))
@@ -79,10 +85,11 @@ struct GrpcSourceNgTests : NoLoggerFixture, tests::util::WithMockXrpLedgerAPISer
             auto const totalPerMarker = totalKeys / numMarkers;
             auto const markers = etl::getMarkers(numMarkers);
 
+            auto store = store_.lock();
             for (auto mi = 0uz; mi < markers.size(); ++mi) {
                 for (auto i = 0uz; i < totalPerMarker; ++i) {
                     auto const mapKey = ripple::strHex(markers.at(mi)).substr(0, 2);
-                    store_[mapKey].push(keys_.at((mi * totalPerMarker) + i));
+                    store->operator[](mapKey).push(keys_.at((mi * totalPerMarker) + i));
                 }
             }
         }
@@ -90,11 +97,11 @@ struct GrpcSourceNgTests : NoLoggerFixture, tests::util::WithMockXrpLedgerAPISer
         std::optional<std::string>
         next(std::string const& marker)
         {
-            std::scoped_lock const lock(mtx_);
+            auto store = store_.lock<std::scoped_lock>();
 
             auto const mapKey = ripple::strHex(marker).substr(0, 2);
-            auto it = store_.lower_bound(mapKey);
-            ASSERT(it != store_.end(), "Lower bound not found for '{}'", mapKey);
+            auto it = store->lower_bound(mapKey);
+            ASSERT(it != store->end(), "Lower bound not found for '{}'", mapKey);
 
             auto& queue = it->second;
             if (queue.empty())
@@ -109,11 +116,11 @@ struct GrpcSourceNgTests : NoLoggerFixture, tests::util::WithMockXrpLedgerAPISer
         std::optional<std::string>
         peek(std::string const& marker)
         {
-            std::scoped_lock const lock(mtx_);
+            auto store = store_.lock<std::scoped_lock>();
 
             auto const mapKey = ripple::strHex(marker).substr(0, 2);
-            auto it = store_.lower_bound(mapKey);
-            ASSERT(it != store_.end(), "Lower bound not found for '{}'", mapKey);
+            auto it = store->lower_bound(mapKey);
+            ASSERT(it != store->end(), "Lower bound not found for '{}'", mapKey);
 
             auto& queue = it->second;
             if (queue.empty())
@@ -124,11 +131,13 @@ struct GrpcSourceNgTests : NoLoggerFixture, tests::util::WithMockXrpLedgerAPISer
         };
     };
 
+protected:
     testing::StrictMock<MockLoadObserver> observer_;
     etlng::impl::GrpcSource grpcSource_;
 };
 
 struct GrpcSourceNgLoadInitialLedgerTests : GrpcSourceNgTests {
+protected:
     uint32_t const sequence_ = 123u;
     uint32_t const numMarkers_ = 4u;
     bool const cacheOnly_ = false;
@@ -180,16 +189,15 @@ TEST_F(GrpcSourceNgLoadInitialLedgerTests, GetLedgerDataNotFound)
             return grpc::Status{grpc::StatusCode::NOT_FOUND, "Not found"};
         });
 
-    auto const [data, success] = grpcSource_.loadInitialLedger(sequence_, numMarkers_, observer_);
-    EXPECT_TRUE(data.empty());
-    EXPECT_FALSE(success);
+    auto const res = grpcSource_.loadInitialLedger(sequence_, numMarkers_, observer_);
+    EXPECT_FALSE(res.has_value());
 }
 
 TEST_F(GrpcSourceNgLoadInitialLedgerTests, ObserverCalledCorrectly)
 {
     auto const key = ripple::uint256{4};
     auto const keyStr = uint256ToString(key);
-    auto const object = CreateTicketLedgerObject("rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", sequence_);
+    auto const object = createTicketLedgerObject("rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", sequence_);
     auto const objectData = object.getSerializer().peekData();
 
     EXPECT_CALL(mockXrpLedgerAPIService, GetLedgerData)
@@ -215,12 +223,12 @@ TEST_F(GrpcSourceNgLoadInitialLedgerTests, ObserverCalledCorrectly)
             EXPECT_EQ(data.size(), 1);
         });
 
-    auto const [data, success] = grpcSource_.loadInitialLedger(sequence_, numMarkers_, observer_);
+    auto const res = grpcSource_.loadInitialLedger(sequence_, numMarkers_, observer_);
 
-    EXPECT_TRUE(success);
-    EXPECT_EQ(data.size(), numMarkers_);
+    EXPECT_TRUE(res.has_value());
+    EXPECT_EQ(res.value().size(), numMarkers_);
 
-    EXPECT_EQ(data, std::vector<std::string>(4, keyStr));
+    EXPECT_EQ(res.value(), std::vector<std::string>(4, keyStr));
 }
 
 TEST_F(GrpcSourceNgLoadInitialLedgerTests, DataTransferredAndObserverCalledCorrectly)
@@ -232,7 +240,7 @@ TEST_F(GrpcSourceNgLoadInitialLedgerTests, DataTransferredAndObserverCalledCorre
 
     auto keyStore = KeyStore(totalKeys, numMarkers_);
 
-    auto const object = CreateTicketLedgerObject("rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", sequence_);
+    auto const object = createTicketLedgerObject("rf1BiGeXwwQoi8Z2ueFYTEXSwuJYfV2Jpn", sequence_);
     auto const objectData = object.getSerializer().peekData();
 
     EXPECT_CALL(mockXrpLedgerAPIService, GetLedgerData)
@@ -280,12 +288,73 @@ TEST_F(GrpcSourceNgLoadInitialLedgerTests, DataTransferredAndObserverCalledCorre
             total += data.size();
         });
 
-    auto const [data, success] = grpcSource_.loadInitialLedger(sequence_, numMarkers_, observer_);
+    auto const res = grpcSource_.loadInitialLedger(sequence_, numMarkers_, observer_);
 
-    EXPECT_TRUE(success);
-    EXPECT_EQ(data.size(), numMarkers_);
+    EXPECT_TRUE(res.has_value());
+    EXPECT_EQ(res.value().size(), numMarkers_);
     EXPECT_EQ(total, totalKeys);
     EXPECT_EQ(totalWithLastKey + totalWithoutLastKey, numMarkers_ * batchesPerMarker);
     EXPECT_EQ(totalWithoutLastKey, numMarkers_);
     EXPECT_EQ(totalWithLastKey, (numMarkers_ - 1) * batchesPerMarker);
+}
+
+struct GrpcSourceStopTests : GrpcSourceNgTests, SyncAsioContextTest {};
+
+TEST_F(GrpcSourceStopTests, LoadInitialLedgerStopsWhenRequested)
+{
+    uint32_t const sequence = 123u;
+    uint32_t const numMarkers = 1;
+
+    std::mutex mtx;
+    std::condition_variable cvGrpcCallActive;
+    std::condition_variable cvStopCalled;
+    bool grpcCallIsActive = false;
+    bool stopHasBeenCalled = false;
+
+    EXPECT_CALL(mockXrpLedgerAPIService, GetLedgerData)
+        .WillOnce([&](grpc::ServerContext*,
+                      org::xrpl::rpc::v1::GetLedgerDataRequest const* request,
+                      org::xrpl::rpc::v1::GetLedgerDataResponse* response) {
+            EXPECT_EQ(request->ledger().sequence(), sequence);
+            EXPECT_EQ(request->user(), "ETL");
+
+            {
+                std::unique_lock const lk(mtx);
+                grpcCallIsActive = true;
+            }
+            cvGrpcCallActive.notify_one();
+
+            {
+                std::unique_lock lk(mtx);
+                cvStopCalled.wait(lk, [&] { return stopHasBeenCalled; });
+            }
+
+            response->set_is_unlimited(true);
+            return grpc::Status::OK;
+        });
+
+    EXPECT_CALL(observer_, onInitialLoadGotMoreObjects).Times(0);
+
+    auto loadTask = std::async(std::launch::async, [&]() {
+        return grpcSource_.loadInitialLedger(sequence, numMarkers, observer_);
+    });
+
+    {
+        std::unique_lock lk(mtx);
+        cvGrpcCallActive.wait(lk, [&] { return grpcCallIsActive; });
+    }
+
+    runSyncOperation([&](boost::asio::yield_context yield) {
+        grpcSource_.stop(yield);
+        {
+            std::unique_lock const lk(mtx);
+            stopHasBeenCalled = true;
+        }
+        cvStopCalled.notify_one();
+    });
+
+    auto const res = loadTask.get();
+
+    ASSERT_FALSE(res.has_value());
+    EXPECT_EQ(res.error(), etlng::InitialLedgerLoadError::Cancelled);
 }

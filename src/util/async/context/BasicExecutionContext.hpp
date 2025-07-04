@@ -61,8 +61,8 @@ struct AsioPoolStrandContext {
     using Executor = boost::asio::strand<boost::asio::thread_pool::executor_type>;
     using Timer = SteadyTimer<Executor>;
 
-    Executor const&
-    getExecutor() const
+    Executor&
+    getExecutor()
     {
         return executor;
     }
@@ -138,7 +138,7 @@ class BasicExecutionContext {
 
 public:
     /** @brief Whether operations on this execution context are noexcept */
-    static constexpr bool isNoexcept = noexcept(ErrorHandlerType::wrap([](auto&) { throw 0; }));
+    static constexpr bool kIS_NOEXCEPT = noexcept(ErrorHandlerType::wrap([](auto&) { throw 0; }));
 
     using ContextHolderType = ContextType;
 
@@ -202,7 +202,7 @@ public:
         SomeStdDuration auto delay,
         SomeHandlerWith<StopToken> auto&& fn,
         std::optional<std::chrono::milliseconds> timeout = std::nullopt
-    ) noexcept(isNoexcept)
+    ) noexcept(kIS_NOEXCEPT)
     {
         if constexpr (not std::is_same_v<decltype(TimerContextProvider::getContext(*this)), decltype(*this)>) {
             return TimerContextProvider::getContext(*this).scheduleAfter(
@@ -242,7 +242,7 @@ public:
         SomeStdDuration auto delay,
         SomeHandlerWith<StopToken, bool> auto&& fn,
         std::optional<std::chrono::milliseconds> timeout = std::nullopt
-    ) noexcept(isNoexcept)
+    ) noexcept(kIS_NOEXCEPT)
     {
         if constexpr (not std::is_same_v<decltype(TimerContextProvider::getContext(*this)), decltype(*this)>) {
             return TimerContextProvider::getContext(*this).scheduleAfter(
@@ -272,13 +272,14 @@ public:
 
     /**
      * @brief Schedule a repeating operation on the execution context
+     * @warning The code of the user-provided action is expected to be thread-safe
      *
      * @param interval The interval at which the operation should be repeated
      * @param fn The block of code to execute; no args allowed and return type must be void
      * @return A repeating stoppable operation that can be used to wait for its cancellation
      */
     [[nodiscard]] auto
-    executeRepeatedly(SomeStdDuration auto interval, SomeHandlerWithoutStopToken auto&& fn) noexcept(isNoexcept)
+    executeRepeatedly(SomeStdDuration auto interval, SomeHandlerWithoutStopToken auto&& fn) noexcept(kIS_NOEXCEPT)
     {
         if constexpr (not std::is_same_v<decltype(TimerContextProvider::getContext(*this)), decltype(*this)>) {
             return TimerContextProvider::getContext(*this).executeRepeatedly(interval, std::forward<decltype(fn)>(fn));
@@ -298,7 +299,7 @@ public:
     execute(
         SomeHandlerWith<StopToken> auto&& fn,
         std::optional<std::chrono::milliseconds> timeout = std::nullopt
-    ) noexcept(isNoexcept)
+    ) noexcept(kIS_NOEXCEPT)
     {
         return DispatcherType::dispatch(
             context_,
@@ -328,7 +329,7 @@ public:
      * @return A stoppable operation that can be used to wait for the result
      */
     [[nodiscard]] auto
-    execute(SomeHandlerWith<StopToken> auto&& fn, SomeStdDuration auto timeout) noexcept(isNoexcept)
+    execute(SomeHandlerWith<StopToken> auto&& fn, SomeStdDuration auto timeout) noexcept(kIS_NOEXCEPT)
     {
         return execute(
             std::forward<decltype(fn)>(fn),
@@ -343,7 +344,7 @@ public:
      * @return A unstoppable operation that can be used to wait for the result
      */
     [[nodiscard]] auto
-    execute(SomeHandlerWithoutStopToken auto&& fn) noexcept(isNoexcept)
+    execute(SomeHandlerWithoutStopToken auto&& fn) noexcept(kIS_NOEXCEPT)
     {
         return DispatcherType::dispatch(
             context_,

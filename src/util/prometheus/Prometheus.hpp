@@ -182,7 +182,7 @@ private:
 };
 
 /**
- * @brief Implemetation of PrometheusInterface
+ * @brief Implementation of PrometheusInterface
  *
  * @note When prometheus is disabled, all metrics will still counted but collection is disabled
  */
@@ -257,7 +257,8 @@ public:
      *
      * @param config The configuration to use
      */
-    void static init(util::config::ClioConfigDefinition const& config);
+    static void
+    init(util::config::ClioConfigDefinition const& config);
 
     /**
      * @brief Get a bool based metric. It will be created if it doesn't exist
@@ -394,10 +395,10 @@ public:
      *
      * @note Be careful with this method because there could be hanging references to counters
      *
-     * @param instance The new prometheus object
+     * @param inst The new prometheus object
      */
     static void
-    replaceInstance(std::unique_ptr<util::prometheus::PrometheusInterface> instance);
+    replaceInstance(std::unique_ptr<util::prometheus::PrometheusInterface> inst);
 
     /**
      * @brief Get the prometheus object stored in the singleton
@@ -408,5 +409,5 @@ public:
     instance();
 
 private:
-    static std::unique_ptr<util::prometheus::PrometheusInterface> instance_;
+    static std::unique_ptr<util::prometheus::PrometheusInterface> impl;
 };

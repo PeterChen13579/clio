@@ -43,6 +43,9 @@ struct AnyStrandTests : ::testing::Test {
     template <typename T>
     using StoppableOperationType = ::testing::NiceMock<MockStoppableOperation<T>>;
 
+    template <typename T>
+    using RepeatingOperationType = NiceMock<MockRepeatingOperation<T>>;
+
     ::testing::NaggyMock<MockStrand> mockStrand;
     AnyStrand strand{static_cast<MockStrand&>(mockStrand)};
 };
@@ -137,7 +140,7 @@ TEST_F(AnyStrandTests, ExecuteWithTimeoutAndStopTokenAndReturnValue)
     ASSERT_EQ(op.get().value(), 42);
 }
 
-TEST_F(AnyStrandTests, ExecuteWithTimoutAndStopTokenAndReturnValueThrowsException)
+TEST_F(AnyStrandTests, ExecuteWithTimeoutAndStopTokenAndReturnValueThrowsException)
 {
     EXPECT_CALL(mockStrand, execute(An<std::function<std::any(AnyStopToken)>>(), _))
         .WillOnce([](auto&&, auto) -> StoppableOperationType<std::any> const& { throw 0; });
@@ -145,4 +148,16 @@ TEST_F(AnyStrandTests, ExecuteWithTimoutAndStopTokenAndReturnValueThrowsExceptio
     EXPECT_ANY_THROW(
         [[maybe_unused]] auto unused = strand.execute([](auto) { return 42; }, std::chrono::milliseconds{1})
     );
+}
+
+TEST_F(AnyStrandTests, RepeatingOperation)
+{
+    auto mockRepeatingOp = RepeatingOperationType<std::any>{};
+    EXPECT_CALL(mockRepeatingOp, wait());
+    EXPECT_CALL(mockStrand, executeRepeatedly(std::chrono::milliseconds{1}, A<std::function<std::any()>>()))
+        .WillOnce([&mockRepeatingOp] -> RepeatingOperationType<std::any> const& { return mockRepeatingOp; });
+
+    auto res = strand.executeRepeatedly(std::chrono::milliseconds{1}, [] -> void { throw 0; });
+    static_assert(std::is_same_v<decltype(res), AnyOperation<void>>);
+    res.wait();
 }

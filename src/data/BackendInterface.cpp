@@ -61,7 +61,7 @@ BackendInterface::finishWrites(std::uint32_t const ledgerSequence)
     LOG(gLog.debug()) << "Want finish writes for " << ledgerSequence;
     auto commitRes = doFinishWrites();
     if (commitRes) {
-        LOG(gLog.debug()) << "Successfully commited. Updating range now to " << ledgerSequence;
+        LOG(gLog.debug()) << "Successfully committed. Updating range now to " << ledgerSequence;
         updateRange(ledgerSequence);
     }
     return commitRes;
@@ -87,7 +87,7 @@ BackendInterface::fetchLedgerObject(
     boost::asio::yield_context yield
 ) const
 {
-    auto obj = cache_.get(key, sequence);
+    auto obj = cache_.get().get(key, sequence);
     if (obj) {
         LOG(gLog.trace()) << "Cache hit - " << ripple::strHex(key);
         return obj;
@@ -126,7 +126,7 @@ BackendInterface::fetchLedgerObjects(
     results.resize(keys.size());
     std::vector<ripple::uint256> misses;
     for (size_t i = 0; i < keys.size(); ++i) {
-        auto obj = cache_.get(keys[i], sequence);
+        auto obj = cache_.get().get(keys[i], sequence);
         if (obj) {
             results[i] = *obj;
         } else {
@@ -156,7 +156,7 @@ BackendInterface::fetchSuccessorKey(
     boost::asio::yield_context yield
 ) const
 {
-    auto succ = cache_.getSuccessor(key, ledgerSequence);
+    auto succ = cache_.get().getSuccessor(key, ledgerSequence);
     if (succ) {
         LOG(gLog.trace()) << "Cache hit - " << ripple::strHex(key);
     } else {
@@ -246,7 +246,7 @@ BackendInterface::fetchBookOffers(
     auto end = std::chrono::system_clock::now();
     LOG(gLog.debug()) << "Fetching " << std::to_string(keys.size()) << " offers took "
                       << std::to_string(getMillis(mid - begin)) << " milliseconds. Fetching next dir took "
-                      << std::to_string(succMillis) << " milliseonds. Fetched next dir " << std::to_string(numSucc)
+                      << std::to_string(succMillis) << " milliseconds. Fetched next dir " << std::to_string(numSucc)
                       << " times"
                       << " Fetching next page of dir took " << std::to_string(pageMillis) << " milliseconds"
                       << ". num pages = " << std::to_string(numPages) << ". Fetching all objects took "
@@ -267,7 +267,7 @@ std::optional<LedgerRange>
 BackendInterface::fetchLedgerRange() const
 {
     std::shared_lock const lck(rngMtx_);
-    return range;
+    return range_;
 }
 
 void
@@ -276,16 +276,16 @@ BackendInterface::updateRange(uint32_t newMax)
     std::scoped_lock const lck(rngMtx_);
 
     ASSERT(
-        !range || newMax >= range->maxSequence,
+        !range_ || newMax >= range_->maxSequence,
         "Range shouldn't exist yet or newMax should be greater. newMax = {}, range->maxSequence = {}",
         newMax,
-        range->maxSequence
+        range_->maxSequence
     );
 
-    if (!range) {
-        range = {.minSequence = newMax, .maxSequence = newMax};
+    if (!range_) {
+        range_ = {.minSequence = newMax, .maxSequence = newMax};
     } else {
-        range->maxSequence = newMax;
+        range_->maxSequence = newMax;
     }
 }
 
@@ -296,10 +296,10 @@ BackendInterface::setRange(uint32_t min, uint32_t max, bool force)
 
     if (!force) {
         ASSERT(min <= max, "Range min must be less than or equal to max");
-        ASSERT(not range.has_value(), "Range was already set");
+        ASSERT(not range_.has_value(), "Range was already set");
     }
 
-    range = {.minSequence = min, .maxSequence = max};
+    range_ = {.minSequence = min, .maxSequence = max};
 }
 
 LedgerPage
@@ -320,10 +320,10 @@ BackendInterface::fetchLedgerPage(
         ripple::uint256 const& curCursor = [&]() {
             if (!keys.empty())
                 return keys.back();
-            return (cursor ? *cursor : firstKey);
+            return (cursor ? *cursor : kFIRST_KEY);
         }();
 
-        std::uint32_t const seq = outOfOrder ? range->maxSequence : ledgerSequence;
+        std::uint32_t const seq = outOfOrder ? range_->maxSequence : ledgerSequence;
         auto succ = fetchSuccessorKey(curCursor, seq, yield);
 
         if (!succ) {

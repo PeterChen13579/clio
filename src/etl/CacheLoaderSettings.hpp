@@ -19,7 +19,7 @@
 
 #pragma once
 
-#include "util/newconfig/ConfigDefinition.hpp"
+#include "util/config/ConfigDefinition.hpp"
 
 #include <cstddef>
 
@@ -64,6 +64,6 @@ struct CacheLoaderSettings {
  * @returns The CacheLoaderSettings object
  */
 [[nodiscard]] CacheLoaderSettings
-make_CacheLoaderSettings(util::config::ClioConfigDefinition const& config);
+makeCacheLoaderSettings(util::config::ClioConfigDefinition const& config);
 
 }  // namespace etl

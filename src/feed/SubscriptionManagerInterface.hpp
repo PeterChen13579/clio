@@ -46,6 +46,12 @@ public:
     virtual ~SubscriptionManagerInterface() = default;
 
     /**
+     * @brief Stop the SubscriptionManager and wait for all jobs to finish.
+     */
+    virtual void
+    stop() = 0;
+
+    /**
      * @brief Subscribe to the book changes feed.
      * @param subscriber
      */
@@ -65,8 +71,10 @@ public:
      * @param transactions The transactions in the current ledger.
      */
     virtual void
-    pubBookChanges(ripple::LedgerHeader const& lgrInfo, std::vector<data::TransactionAndMetadata> const& transactions)
-        const = 0;
+    pubBookChanges(
+        ripple::LedgerHeader const& lgrInfo,
+        std::vector<data::TransactionAndMetadata> const& transactions
+    ) = 0;
 
     /**
      * @brief Subscribe to the proposed transactions feed.
@@ -135,7 +143,7 @@ public:
         ripple::Fees const& fees,
         std::string const& ledgerRange,
         std::uint32_t txnCount
-    ) const = 0;
+    ) = 0;
 
     /**
      * @brief Subscribe to the manifest feed.
@@ -156,7 +164,7 @@ public:
      * @param manifestJson The manifest json to forward.
      */
     virtual void
-    forwardManifest(boost::json::object const& manifestJson) const = 0;
+    forwardManifest(boost::json::object const& manifestJson) = 0;
 
     /**
      * @brief Subscribe to the validation feed.
@@ -177,7 +185,7 @@ public:
      * @param validationJson The validation feed json to forward.
      */
     virtual void
-    forwardValidation(boost::json::object const& validationJson) const = 0;
+    forwardValidation(boost::json::object const& validationJson) = 0;
 
     /**
      * @brief Subscribe to the transactions feed.
@@ -236,10 +244,25 @@ public:
     /**
      * @brief Get the number of subscribers.
      *
-     * @return The report of the number of subscribers
+     * @return The report of the number of subscribers.
      */
     virtual boost::json::object
     report() const = 0;
+
+    /**
+     * @brief Set the networkID.
+     * @param networkID The network id to set.
+     */
+    virtual void
+    setNetworkID(uint32_t networkID) = 0;
+
+    /**
+     * @brief Get the networkID.
+     *
+     * @return The network id.
+     */
+    virtual uint32_t
+    getNetworkID() const = 0;
 };
 
 }  // namespace feed

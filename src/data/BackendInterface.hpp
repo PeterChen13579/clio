@@ -20,7 +20,7 @@
 #pragma once
 
 #include "data/DBHelpers.hpp"
-#include "data/LedgerCache.hpp"
+#include "data/LedgerCacheInterface.hpp"
 #include "data/Types.hpp"
 #include "etl/CorruptionDetector.hpp"
 #include "util/log/Logger.hpp"
@@ -31,6 +31,7 @@
 #include <boost/json.hpp>
 #include <boost/json/object.hpp>
 #include <boost/utility/result_of.hpp>
+#include <boost/uuid/uuid.hpp>
 #include <xrpl/basics/base_uint.h>
 #include <xrpl/protocol/AccountID.h>
 #include <xrpl/protocol/Fees.h>
@@ -40,6 +41,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <optional>
 #include <shared_mutex>
 #include <string>
@@ -65,9 +67,9 @@ public:
     }
 };
 
-static constexpr std::size_t DEFAULT_WAIT_BETWEEN_RETRY = 500;
+static constexpr std::size_t kDEFAULT_WAIT_BETWEEN_RETRY = 500;
 /**
- * @brief A helper function that catches DatabaseTimout exceptions and retries indefinitely.
+ * @brief A helper function that catches DatabaseTimeout exceptions and retries indefinitely.
  *
  * @tparam FnType The type of function object to execute
  * @param func The function object to execute
@@ -76,9 +78,9 @@ static constexpr std::size_t DEFAULT_WAIT_BETWEEN_RETRY = 500;
  */
 template <typename FnType>
 auto
-retryOnTimeout(FnType func, size_t waitMs = DEFAULT_WAIT_BETWEEN_RETRY)
+retryOnTimeout(FnType func, size_t waitMs = kDEFAULT_WAIT_BETWEEN_RETRY)
 {
-    static util::Logger const log{"Backend"};
+    static util::Logger const log{"Backend"};  // NOLINT(readability-identifier-naming)
 
     while (true) {
         try {
@@ -138,19 +140,28 @@ synchronousAndRetryOnTimeout(FnType&& func)
 class BackendInterface {
 protected:
     mutable std::shared_mutex rngMtx_;
-    std::optional<LedgerRange> range;
-    LedgerCache cache_;
-    std::optional<etl::CorruptionDetector<LedgerCache>> corruptionDetector_;
+    std::optional<LedgerRange> range_;
+    std::reference_wrapper<LedgerCacheInterface> cache_;
+    std::optional<etl::CorruptionDetector> corruptionDetector_;
 
 public:
-    BackendInterface() = default;
+    /**
+     * @brief Construct a new backend interface instance.
+     *
+     * @param cache The ledger cache to use
+     */
+    BackendInterface(LedgerCacheInterface& cache) : cache_{cache}
+    {
+    }
     virtual ~BackendInterface() = default;
 
-    // TODO: Remove this hack. Cache should not be exposed thru BackendInterface
+    // TODO https://github.com/XRPLF/clio/issues/1956: Remove this hack once old ETL is removed.
+    // Cache should not be exposed thru BackendInterface
+
     /**
      * @return Immutable cache
      */
-    LedgerCache const&
+    LedgerCacheInterface const&
     cache() const
     {
         return cache_;
@@ -159,7 +170,7 @@ public:
     /**
      * @return Mutable cache
      */
-    LedgerCache&
+    LedgerCacheInterface&
     cache()
     {
         return cache_;
@@ -171,7 +182,7 @@ public:
      * @param detector The corruption detector to set
      */
     void
-    setCorruptionDetector(etl::CorruptionDetector<LedgerCache> detector)
+    setCorruptionDetector(etl::CorruptionDetector detector)
     {
         corruptionDetector_ = std::move(detector);
     }
@@ -387,7 +398,7 @@ public:
      * @brief Fetches a specific ledger object.
      *
      * Currently the real fetch happens in doFetchLedgerObject and fetchLedgerObject attempts to fetch from Cache first
-     * and only calls out to the real DB if a cache miss ocurred.
+     * and only calls out to the real DB if a cache miss occurred.
      *
      * @param key The key of the object
      * @param sequence The ledger sequence to fetch for
@@ -501,7 +512,7 @@ public:
      * @param key The key to fetch for
      * @param ledgerSequence The ledger sequence to fetch for
      * @param yield The coroutine context
-     * @return The sucessor on success; nullopt otherwise
+     * @return The successor on success; nullopt otherwise
      */
     std::optional<LedgerObject>
     fetchSuccessorObject(ripple::uint256 key, std::uint32_t ledgerSequence, boost::asio::yield_context yield) const;
@@ -515,7 +526,7 @@ public:
      * @param key The key to fetch for
      * @param ledgerSequence The ledger sequence to fetch for
      * @param yield The coroutine context
-     * @return The sucessor key on success; nullopt otherwise
+     * @return The successor key on success; nullopt otherwise
      */
     std::optional<ripple::uint256>
     fetchSuccessorKey(ripple::uint256 key, std::uint32_t ledgerSequence, boost::asio::yield_context yield) const;
@@ -526,7 +537,7 @@ public:
      * @param key The key to fetch for
      * @param ledgerSequence The ledger sequence to fetch for
      * @param yield The coroutine context
-     * @return The sucessor on success; nullopt otherwise
+     * @return The successor on success; nullopt otherwise
      */
     virtual std::optional<ripple::uint256>
     doFetchSuccessorKey(ripple::uint256 key, std::uint32_t ledgerSequence, boost::asio::yield_context yield) const = 0;
@@ -557,6 +568,19 @@ public:
      */
     virtual std::optional<std::string>
     fetchMigratorStatus(std::string const& migratorName, boost::asio::yield_context yield) const = 0;
+
+    /** @brief Return type for fetchClioNodesData() method */
+    using ClioNodesDataFetchResult =
+        std::expected<std::vector<std::pair<boost::uuids::uuid, std::string>>, std::string>;
+
+    /**
+     * @brief Fetches the data of all nodes in the cluster.
+     *
+     * @param yield The coroutine context
+     *@return The data of all nodes in the cluster.
+     */
+    [[nodiscard]] virtual ClioNodesDataFetchResult
+    fetchClioNodesData(boost::asio::yield_context yield) const = 0;
 
     /**
      * @brief Synchronously fetches the ledger range from DB.
@@ -639,6 +663,14 @@ public:
     writeAccountTransactions(std::vector<AccountTransactionsData> data) = 0;
 
     /**
+     * @brief Write a new account transaction.
+     *
+     * @param record An object representing the account transaction
+     */
+    virtual void
+    writeAccountTransaction(AccountTransactionsData record) = 0;
+
+    /**
      * @brief Write NFTs transactions.
      *
      * @param data A vector of NFTTransactionsData objects
@@ -665,6 +697,15 @@ public:
     writeSuccessor(std::string&& key, std::uint32_t seq, std::string&& successor) = 0;
 
     /**
+     * @brief Write a node message. Used by ClusterCommunicationService
+     *
+     * @param uuid The UUID of the node
+     * @param message The message to write
+     */
+    virtual void
+    writeNodeMessage(boost::uuids::uuid const& uuid, std::string message) = 0;
+
+    /**
      * @brief Starts a write transaction with the DB. No-op for cassandra.
      *
      * Note: Can potentially be deprecated and removed.
@@ -682,6 +723,12 @@ public:
      */
     bool
     finishWrites(std::uint32_t ledgerSequence);
+
+    /**
+     * @brief Wait for all pending writes to finish.
+     */
+    virtual void
+    waitForWritesToFinish() = 0;
 
     /**
      * @brief Mark the migration status of a migrator as Migrated in the database
