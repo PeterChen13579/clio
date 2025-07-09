@@ -100,3 +100,6 @@ endif ()
 if (snapshot)
   add_subdirectory(tools/snapshot)
 endif ()
+
+include(cmake/CGo.cmake)
+add_subdirectory(tools/db_checker)
