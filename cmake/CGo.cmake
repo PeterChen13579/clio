@@ -37,7 +37,7 @@ macro (add_cgo_executable GO_MOD_NAME GO_FILES CGO_DEPS GO_BIN)
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     COMMAND echo Building CGO modules for ${GO_BIN}
     COMMAND ${CMAKE_COMMAND} -E remove ${CGO_BUILT_FLAG}
-    COMMAND env ${CGO_ENVS} go build -a -o ${GO_BIN} ./...
+    COMMAND env ${CGO_ENVS} go build -a -o ${GO_BIN} .
     COMMAND touch ${CGO_BUILT_FLAG}
     DEPENDS SHAMap clio_etl
   )
@@ -48,7 +48,7 @@ macro (add_cgo_executable GO_MOD_NAME GO_FILES CGO_DEPS GO_BIN)
     OUTPUT ${GO_BUILT_FLAG}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     COMMAND echo Building GO modules for ${GO_BIN}
-    COMMAND env ${CGO_ENVS} go build -o ${GO_BIN} ./...
+    COMMAND env ${CGO_ENVS} go build -o ${GO_BIN} .
     COMMAND touch ${GO_BUILT_FLAG}
     DEPENDS ${CGO_BUILT_FLAG} ${${GO_FILES}}
   )
