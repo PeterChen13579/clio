@@ -22,7 +22,7 @@ func getLedgerRange(cluster *gocql.ClusterConfig) (uint64, uint64, error) {
 
 	session, err := cluster.CreateSession()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to create session: %v", err)
 	}
 
 	defer session.Close()
@@ -38,14 +38,13 @@ func getLedgerRange(cluster *gocql.ClusterConfig) (uint64, uint64, error) {
 }
 
 var (
-	clusterHosts  = kingpin.Arg("hosts", "Your Scylla nodes IP addresses, comma separated (i.e. 192.168.1.1,192.168.1.2,192.168.1.3)").Required().String()
+	clusterHosts  = kingpin.Arg("hosts", "Your database nodes, comma separated (IPs for ScyllaDB, AWS endpoint for Keyspaces)").Required().String()
 	fromLedgerIdx = kingpin.Flag("fromLedgerIdx", "Sets the smallest ledger_index to validate").Short('f').Required().Uint64()
 	toLedgerIdx   = kingpin.Flag("toLedgerIdx", "Sets the largest ledger_index to validate").Short('e').Default("0").Uint64()
 	//----------------transactions table----------------
-	tx        = kingpin.Flag("tx", "Whether to do tx validation").Default("false").Bool()
-	txSkipSha = kingpin.Flag("txSkipSha", "Whether to skip SHA hash for tx validation").Default("false").Bool()
-	step      = kingpin.Flag("step", "Set the tx numbers to be validated concurrently").Short('s').Default("50").Int()
-	//skip nft or account_tx check
+	tx            = kingpin.Flag("tx", "Whether to do tx validation").Default("false").Bool()
+	txSkipSha     = kingpin.Flag("txSkipSha", "Whether to skip SHA hash for tx validation").Default("false").Bool()
+	step          = kingpin.Flag("step", "Set the tx numbers to be validated concurrently").Short('s').Default("50").Int()
 	txSkipNFT     = kingpin.Flag("txSkipNFT", "Whether to skip NFT check for tx validation").Default("false").Bool()
 	txSkipAccount = kingpin.Flag("txSkipAccount", "Whether to skip account_tx check for tx validation").Default("false").Bool()
 	NFTUriFix     = kingpin.Flag("NFTUriFix", "Whether to fix NFT uri").Default("false").Bool()
@@ -64,10 +63,12 @@ var (
 
 	clusterTimeout    = kingpin.Flag("timeout", "Maximum duration for query execution in millisecond").Short('t').Default("90000").Int()
 	clusterCQLVersion = kingpin.Flag("cql-version", "The CQL version to use").Short('l').Default("3.0.0").String()
-	keyspace          = kingpin.Flag("keyspace", "Keyspace to use").Short('k').Default("clio_fh").String()
+	keyspace          = kingpin.Flag("keyspace", "Keyspace to use").Short('k').Required().String()
+	userName          = kingpin.Flag("username", "Username to use when connecting to the cluster").String()
+	password          = kingpin.Flag("password", "Password to use when connecting to the cluster").String()
 
-	userName = kingpin.Flag("username", "Username to use when connecting to the cluster").String()
-	password = kingpin.Flag("password", "Password to use when connecting to the cluster").String()
+	awsKeyspaces = kingpin.Flag("aws-keyspaces", "Enable AWS Keyspaces specific connection settings (TLS, port 9142).").Default("false").Bool()
+	certPath     = kingpin.Flag("cert-path", "Path to the Amazon Keyspaces certificate file (e.g., sf-class2-root.crt). Required if --aws-keyspaces is set.").String()
 )
 
 func main() {
@@ -86,7 +87,25 @@ func main() {
 	cluster.CQLVersion = *clusterCQLVersion
 	cluster.Keyspace = *keyspace
 
-	// Limit to a single connection during authentication to avoid concurrent authentication attempts.
+	if *awsKeyspaces {
+		log.Println("AWS Keyspaces mode enabled. Applying TLS and specific port settings.")
+		cluster.Port = 9142
+		cluster.Consistency = gocql.LocalQuorum
+		cluster.DisableInitialHostLookup = false
+
+		if *certPath == "" {
+			log.Fatal("Error: --cert-path must be provided when using the --aws-keyspaces flag.")
+		}
+
+		cluster.SslOpts = &gocql.SslOptions{
+			CaPath:                 *certPath,
+			EnableHostVerification: false,
+		}
+	} else {
+		log.Println("ScyllaDB mode enabled.")
+		cluster.Port = 9042
+	}
+
 	if *userName != "" {
 		cluster.Authenticator = gocql.PasswordAuthenticator{
 			Username: *userName,

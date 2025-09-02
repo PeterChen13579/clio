@@ -80,7 +80,6 @@
 #include <ripple/protocol/jss.h>
 #include <ripple/protocol/nftPageMask.h>
 #include <ripple/protocol/tokens.h>
-
 #include <xrpl/json/json_reader.h>
 #include <xrpl/json/json_value.h>
 
@@ -268,7 +267,7 @@ toExpandedJson(
 
     if (nftEnabled == NFTokenjson::ENABLE) {
         Json::Value nftJson;
-        ripple::insertNFTSyntheticInJson(nftJson, txn, *meta);
+        ripple::RPC::insertNFTSyntheticInJson(nftJson, txn, *meta);
         // if there is no nft fields, the nftJson will be {"meta":null}
         auto const nftBoostJson = toBoostJson(nftJson).as_object();
         if (nftBoostJson.contains(JS(meta)) and nftBoostJson.at(JS(meta)).is_object()) {
