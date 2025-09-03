@@ -73,13 +73,16 @@ func TraverseTxHashFromDB(session *gocql.Session, ledgerIndex uint64, skipSha bo
 		allIndexes := append(append(createdIndexes, deletedIndexes...), updatedIndexes...)
 		for _, index := range allIndexes {
 			if _, ok := notExistIndexes[[32]byte(index)]; !ok {
-				var count int
-				err := session.Query(`select count(*) from diff where seq = ? and key = ?`, ledgerIndex, index).Scan(&count)
+				var result []byte
+				err := session.Query(`select key from diff where seq = ? and key = ?`, ledgerIndex, index).Scan(&result)
+
 				if err != nil {
-					log.Fatalf("Error: %v diff reading ledger %d index %x", err, ledgerIndex, index)
-				}
-				if count == 0 {
-					log.Printf("Error: diff not found for index %x in ledger %d\n", index, ledgerIndex)
+					// If the error is gocql.ErrNotFound, it means the row doesn't exist.
+					if err == gocql.ErrNotFound {
+						log.Printf("Error: diff not found for index %x in ledger %d\n", index, ledgerIndex)
+					} else {
+						log.Fatalf("Error: %v diff reading ledger %d index %x", err, ledgerIndex, index)
+					}
 				}
 			}
 		}
@@ -113,60 +116,72 @@ func checkNFT(session *gocql.Session, ledgerIndex uint64, tx []byte, metadata []
 
 	//nf_token_transactions
 	for _, nft := range nftTxData {
-		var count int
-		err := session.Query(`select count(*) from nf_token_transactions where token_id = ? and seq_idx = (?,?)`, nft.TokenId, ledgerIndex, nft.TxIdx).Scan(&count)
+		var result []byte
+		err := session.Query(`select token_id from nf_token_transactions where token_id = ? and seq_idx = (?,?)`, nft.TokenId, ledgerIndex, nft.TxIdx).Scan(&result)
+
 		if err != nil {
-			log.Fatalf("Error: %v nf_token_transactions reading %x ledger %d txId %d", err, nft.TokenId, ledgerIndex, nft.TxIdx)
-		}
-		if count == 0 {
-			log.Printf("Error: nf_token_transactions not found for nft %x ledger %d txId %d\n", nft.TokenId, ledgerIndex, nft.TxIdx)
+			// If the error is gocql.ErrNotFound, it means the row doesn't exist.
+			if err == gocql.ErrNotFound {
+				log.Printf("Error: nf_token_transactions not found for nft %x ledger %d txId %d\n", nft.TokenId, ledgerIndex, nft.TxIdx)
+			} else {
+				log.Fatalf("Error: %v nf_token_transactions reading %x ledger %d txId %d", err, nft.TokenId, ledgerIndex, nft.TxIdx)
+			}
 		}
 	}
 
 	for _, nft := range nftData {
-		//nf_tokens
-		var count int
-		err := session.Query(`select count(*) from nf_tokens where token_id = ? and sequence = ?`, nft.TokenId, ledgerIndex).Scan(&count)
+		// --- nf_tokens check ---
+		var result []byte
+		err := session.Query(`select token_id from nf_tokens where token_id = ? and sequence = ?`, nft.TokenId, ledgerIndex).Scan(&result)
+
 		if err != nil {
-			log.Fatalf("Error: %v nf_tokens reading %x ledger %d", err, nft.TokenId, ledgerIndex)
-		}
-		if count == 0 {
-			log.Printf("Error: nf_tokens not found for nft %x ledger %d\n", nft.TokenId, ledgerIndex)
+			if err == gocql.ErrNotFound {
+				log.Printf("Error: nf_tokens not found for nft %x ledger %d\n", nft.TokenId, ledgerIndex)
+			} else {
+				log.Fatalf("Error: %v nf_tokens reading %x ledger %d", err, nft.TokenId, ledgerIndex)
+			}
 		}
 
-		// nf_token_uris and issuer_nf_tokens_v2
+		// --- nf_token_uris and issuer_nf_tokens_v2 checks ---
 		if nft.UriExists {
-			err := session.Query(`select count(*) from nf_token_uris where token_id = ? and sequence = ?`, nft.TokenId, ledgerIndex).Scan(&count)
+			// --- nf_token_uris check ---
+			err = session.Query(`select token_id from nf_token_uris where token_id = ? and sequence = ?`, nft.TokenId, ledgerIndex).Scan(&result)
+
 			if err != nil {
-				log.Fatalf("Error: %v nf_token_uris reading %x ledger %d", err, nft.TokenId, ledgerIndex)
-			}
-			if count == 0 {
-				log.Printf("Error: nf_token_uris not found for nft %x ledger %d\n", nft.TokenId, ledgerIndex)
-				if fixUri {
-					err = session.Query("insert into nf_token_uris (token_id, sequence, uri) values (?, ?, ?)", nft.TokenId, ledgerIndex, nft.Uri).Exec()
-					if err != nil {
-						log.Fatalf("Error: nf_token_uris insert %x uri: %x : %d, %v", nft.TokenId, nft.Uri, ledgerIndex, err)
+				if err == gocql.ErrNotFound {
+					log.Printf("Error: nf_token_uris not found for nft %x ledger %d\n", nft.TokenId, ledgerIndex)
+
+					if fixUri {
+						err = session.Query("insert into nf_token_uris (token_id, sequence, uri) values (?, ?, ?)", nft.TokenId, ledgerIndex, nft.Uri).Exec()
+						if err != nil {
+							log.Fatalf("Error: nf_token_uris insert %x uri: %x : %d, %v", nft.TokenId, nft.Uri, ledgerIndex, err)
+						}
+
+						// Double confirm the insert was successful by re-querying.
+						confirmErr := session.Query(`select token_id from nf_token_uris where token_id = ? and sequence = ?`, nft.TokenId, ledgerIndex).Scan(&result)
+						if confirmErr == nil {
+							log.Printf("Success: nf_token_uris fixed %x uri: %x : %d", nft.TokenId, nft.Uri, ledgerIndex)
+						} else {
+							log.Printf("Failed: nf_token_uris fixed %x uri: %x : %d", nft.TokenId, nft.Uri, ledgerIndex)
+						}
 					}
-					// double confirm if the insert is successful
-					session.Query(`select count(*) from nf_token_uris where token_id = ? and sequence = ?`, nft.TokenId, ledgerIndex).Scan(&count)
-					if count == 1 {
-						log.Printf("Success: nf_token_uris fixed %x uri: %x : %d", nft.TokenId, nft.Uri, ledgerIndex)
-					} else {
-						log.Printf("Failed: nf_token_uris fixed %x uri: %x : %d", nft.TokenId, nft.Uri, ledgerIndex)
-					}
+				} else {
+					log.Fatalf("Error: %v nf_token_uris reading %x ledger %d", err, nft.TokenId, ledgerIndex)
 				}
 			}
 
-			err = session.Query(`select count(*) from issuer_nf_tokens_v2 where issuer = ? and taxon = ? and token_id = ?`,
-				nft.Issuer, nft.Taxon, nft.TokenId).Scan(&count)
+			// --- issuer_nf_tokens_v2 check ---
+			err = session.Query(`select token_id from issuer_nf_tokens_v2 where issuer = ? and taxon = ? and token_id = ?`,
+				nft.Issuer, nft.Taxon, nft.TokenId).Scan(&result)
+
 			if err != nil {
-				log.Fatalf("Error: %v issuer_nf_tokens_v2 reading issuer %x taxon %d token_id %x", err, nft.Issuer, nft.Taxon, nft.TokenId)
-			}
-			if count == 0 {
-				log.Printf("Error: issuer_nf_tokens_v2 not found for issuer %x taxon %d token_id %x\n", nft.Issuer, nft.Taxon, nft.TokenId)
+				if err == gocql.ErrNotFound {
+					log.Printf("Error: issuer_nf_tokens_v2 not found for issuer %x taxon %d token_id %x\n", nft.Issuer, nft.Taxon, nft.TokenId)
+				} else {
+					log.Fatalf("Error: %v issuer_nf_tokens_v2 reading issuer %x taxon %d token_id %x", err, nft.Issuer, nft.Taxon, nft.TokenId)
+				}
 			}
 		}
-
 	}
 }
 
@@ -177,13 +192,17 @@ func checkAccountTx(session *gocql.Session, ledgerIndex uint64, tx []byte, metad
 		log.Printf("Error: too many accounts in ledger %d tx %d\n", ledgerIndex, txIdx)
 	}
 	for _, account := range accounts {
-		var count int
-		err := session.Query(`select count(*) from account_tx where account = ? and seq_idx = (?,?)`, account, ledgerIndex, txIdx).Scan(&count)
+		var result []byte
+		err := session.Query(`select account from account_tx where account = ? and seq_idx = (?,?)`, account, ledgerIndex, txIdx).Scan(&result)
+
 		if err != nil {
-			log.Fatalf("Error: %v account_tx reading %x ledger %d txId %d", err, account, ledgerIndex, txIdx)
-		}
-		if count == 0 {
-			log.Printf("Error: account_tx not found for account %x ledger %d txId %d\n", account, ledgerIndex, txIdx)
+			// Check for the specific "not found" error.
+			if err == gocql.ErrNotFound {
+				log.Printf("Error: account_tx not found for account %x ledger %d txId %d\n", account, ledgerIndex, txIdx)
+			} else {
+				// Any other error is a fatal problem with the database connection or query.
+				log.Fatalf("Error: %v account_tx reading %x ledger %d txId %d", err, account, ledgerIndex, txIdx)
+			}
 		}
 	}
 }
