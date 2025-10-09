@@ -531,22 +531,19 @@ private:
     void
     decrementOutstandingRequestCount(uint32_t seq)
     {
-        // sanity check
-        std::unique_lock lck(mtx_);
-        ASSERT(numWriteRequestsOutstanding_.at(seq) > 0, "Decrementing num outstanding below 0");
-        size_t const cur = (--numWriteRequestsOutstanding_.at(seq));
+        size_t cur = 0;
         {
-            // mutex lock required to prevent race condition around spurious
-            // wakeup
-            std::lock_guard const lck(throttleMutex_);
-            throttleCv_.notify_one();
+            std::unique_lock lck(mtx_);
+            ASSERT(numWriteRequestsOutstanding_.at(seq) > 0, "Decrementing num outstanding below 0");
+            cur = --numWriteRequestsOutstanding_.at(seq);
         }
-        if (cur == 0) {
-            // mutex lock required to prevent race condition around spurious
-            // wakeup
-            std::lock_guard const lck(syncMutex_);
+
+        // The notifying thread does not need to hold the lock on the same mutex as the one held by the waiting
+        // thread(s) https://en.cppreference.com/w/cpp/thread/condition_variable/notify_one
+        throttleCv_.notify_one();
+
+        if (cur == 0)
             syncCv_.notify_one();
-        }
     }
 
     bool
